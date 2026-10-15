@@ -199,7 +199,7 @@ function sanitizeCanvasClone(clonedDoc: Document) {
   clonedDoc.querySelectorAll('style').forEach(styleElement => {
     styleElement.textContent = (styleElement.textContent || '')
       .replace(/color-mix\([^;{}]*\)/gi, 'rgba(0, 0, 0, 0.35)')
-      .replace(/oklab\([^)]*\)/gi, '#777777');
+      .replace(/(?:oklab|oklch|lab|lch)\([^)]*\)/gi, '#777777');
   });
 
   const fallbackFor = (property: string) => {
@@ -1870,11 +1870,18 @@ export default function App() {
                         onClick={async () => {
                           if (!user) { alert("Effettua il login per salvare."); return; }
                           try {
-                            const screenshotUrl = await uploadConstellationScreenshot();
+                            let screenshotUrl: string | undefined;
+                            try {
+                              screenshotUrl = await uploadConstellationScreenshot();
+                            } catch (screenshotError) {
+                              console.error('Errore generazione screenshot:', screenshotError);
+                            }
                             const saved = await saveConstellation(characters, screenshotUrl);
                             if (saved) {
                               await fetchHistory(user.uid);
-                              alert("Costellazione salvata. L’immagine è stata inviata anche all’area admin.");
+                              alert(screenshotUrl
+                                ? "Costellazione salvata. L’immagine è stata inviata anche all’area admin."
+                                : "Costellazione salvata nell’area admin, ma lo screenshot non è stato generato. Puoi comunque inviare il report e riprovare l’immagine.");
                             }
                           } catch (error: any) {
                             console.error('Errore salvataggio costellazione:', error);
