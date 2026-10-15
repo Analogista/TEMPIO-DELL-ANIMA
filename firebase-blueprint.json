@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Unified profile information.",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "email": { "type": "string" },
+        "eta": { "type": "string" },
+        "citta": { "type": "string" },
+        "puntoRottura": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nome", "updatedAt"]
+    },
+    "RuneReading": {
+      "title": "RuneReading",
+      "description": "A record of a rune reading session.",
+      "type": "object",
+      "properties": {
+        "question": { "type": "string" },
+        "runeIds": { "type": "array", "items": { "type": "number" } },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["question", "runeIds", "timestamp"]
+    },
+    "FlowerReading": {
+      "title": "FlowerReading",
+      "description": "A record of a Bach flower selection.",
+      "type": "object",
+      "properties": {
+        "flowerIds": { "type": "array", "items": { "type": "number" } },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["flowerIds", "timestamp"]
+    },
+    "Constellation": {
+      "title": "Constellation",
+      "description": "A record of a family constellation session.",
+      "type": "object",
+      "properties": {
+        "characters": { "type": "array" },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["characters", "timestamp"]
+    },
+    "Candidacy": {
+      "title": "Candidacy",
+      "description": "A request for a healing path with an alchemical questionnaire.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "nome": { "type": "string" },
+        "email": { "type": "string" },
+        "eta": { "type": "string" },
+        "citta": { "type": "string" },
+        "puntoRottura": { "type": "string" },
+        "radiceTempo": { "type": "string" },
+        "termometroUrgenza": { "type": "number" },
+        "obiettivoProfondo": { "type": "string" },
+        "pattoFiducia": { "type": "boolean" },
+        "rispettoSpazioSacro": { "type": "boolean" },
+        "portaleVisivo": { "type": "boolean" },
+        "message": { "type": "string" },
+        "photoUrls": { "type": "array", "items": { "type": "string" } },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}/profile/data": {
+      "schema": "UserProfile",
+      "description": "Unified profile of the user."
+    },
+    "/users/{userId}/runeReadings/{readingId}": {
+      "schema": "RuneReading",
+      "description": "User's rune reading history."
+    },
+    "/users/{userId}/flowerReadings/{readingId}": {
+      "schema": "FlowerReading",
+      "description": "User's flower remedy history."
+    },
+    "/users/{userId}/constellations/{constellationId}": {
+      "schema": "Constellation",
+      "description": "User's constellation sessions."
+    },
+    "/candidacies/{candidacyId}": {
+      "schema": "Candidacy",
+      "description": "Global candidacy applications for admin review."
+    },
+    "/allReadings/{readingId}": {
+      "schema": "object",
+      "description": "Global readings collection for admin review."
+    }
+  }
+}

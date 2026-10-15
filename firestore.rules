@@ -1,0 +1,134 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Admin check - checking specific verified emails
+    function isAdmin() {
+      return isSignedIn() 
+        && request.auth.token.email_verified == true
+        && (request.auth.token.email == 'analogistabrindisi@gmail.com' || request.auth.token.email == 'infantinograziamaria@gmail.com');
+    }
+
+    // Validation helpers
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['displayName', 'createdAt']) 
+        && data.keys().size() == 2
+        && data.displayName is string && data.displayName.size() <= 100
+        && data.createdAt == request.time;
+    }
+
+    function isValidUserPrivateInfo(data) {
+      return data.keys().hasAll(['email', 'nome', 'eta', 'sesso', 'updatedAt'])
+        && data.keys().size() == 5
+        && data.email == request.auth.token.email
+        && data.nome is string && data.nome.size() <= 100
+        && data.eta is string && data.eta.size() <= 3
+        && data.sesso is string && data.sesso.size() <= 1
+        && data.updatedAt == request.time;
+    }
+
+    function isValidRuneReading(data) {
+      return data.keys().hasAll(['question', 'runeIds', 'timestamp'])
+        && data.keys().size() == 3
+        && data.question is string && data.question.size() <= 500
+        && data.runeIds is list && data.runeIds.size() <= 24
+        && data.timestamp == request.time;
+    }
+
+    function isValidFlowerReading(data) {
+      return data.keys().hasAll(['flowerIds', 'timestamp'])
+        && data.keys().size() == 2
+        && data.flowerIds is list && data.flowerIds.size() <= 38
+        && data.timestamp == request.time;
+    }
+
+    function isValidConstellation(data) {
+      return data.keys().hasAll(['characters', 'timestamp'])
+        && data.keys().size() == 2
+        && data.characters is list && data.characters.size() <= 50
+        && data.timestamp == request.time;
+    }
+
+    function isValidCandidacy(data) {
+      return data.keys().hasAll(['userId', 'nome', 'email', 'puntoRottura', 'radiceTempo', 'termometroUrgenza', 'obiettivoProfondo', 'pattoFiducia', 'rispettoSpazioSacro', 'portaleVisivo', 'status', 'createdAt'])
+        && data.userId == request.auth.uid
+        && data.nome is string && data.nome.size() <= 100
+        && data.email is string && data.email.size() <= 100
+        && data.puntoRottura is string && data.puntoRottura.size() <= 1000
+        && data.radiceTempo in ['meno_mese', 'qualche_mese', 'cronico']
+        && data.termometroUrgenza is number && data.termometroUrgenza >= 1 && data.termometroUrgenza <= 10
+        && data.obiettivoProfondo in ['sollievo', 'percorso']
+        && data.pattoFiducia is bool
+        && data.rispettoSpazioSacro is bool
+        && data.portaleVisivo is bool
+        && (data.get('message', '') is string && data.get('message', '').size() <= 2000)
+        && (data.get('photos', []) is list && data.get('photos', []).size() <= 4)
+        && data.status == 'pending'
+        && data.createdAt == request.time;
+    }
+
+    // Rules for Users collection
+    match /users/{userId} {
+      // Profile data (merged public/private for simplicity as requested by app evolution)
+      match /profile/data {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
+      }
+
+      match /runeReadings/{readingId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidId(readingId);
+      }
+
+      match /flowerReadings/{readingId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidId(readingId);
+      }
+
+      match /constellations/{constellationId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidId(constellationId);
+      }
+
+      match /candidacies/{candidacyId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidId(candidacyId);
+      }
+    }
+
+    // Global collections for Admin
+    match /candidacies/{candidacyId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn(); // Users can submit candidacies
+      allow update, delete: if isAdmin();
+    }
+
+    match /allReadings/{readingId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+    
+    // Admins collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+    }
+  }
+}
