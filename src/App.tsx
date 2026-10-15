@@ -194,6 +194,15 @@ function describeCharacterPosition(characters: PositionCharacter[], targetId: st
   };
 }
 
+function sanitizeCanvasClone(clonedDoc: Document) {
+  // Tailwind may emit color-mix/in oklab; html2canvas cannot parse it yet.
+  clonedDoc.querySelectorAll('style').forEach(styleElement => {
+    styleElement.textContent = (styleElement.textContent || '')
+      .replace(/color-mix\([^;{}]*\)/gi, 'rgba(0, 0, 0, 0.35)')
+      .replace(/oklab\([^)]*\)/gi, '#777777');
+  });
+}
+
 export default function App() {
   const [characters, setCharacters] = useState<CharacterType[]>([]);
   const [drawingCharacter, setDrawingCharacter] = useState<{ shape: string, color: string } | null>(null);
@@ -489,6 +498,7 @@ export default function App() {
       logging: false,
       allowTaint: true,
       onclone: (clonedDoc) => {
+        sanitizeCanvasClone(clonedDoc);
         const shareBtn = clonedDoc.querySelector('[title="Invia a Graziamaria"]');
         if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
         const main = clonedDoc.querySelector('main');
@@ -918,6 +928,7 @@ export default function App() {
         allowTaint: true,
         // Ensure we capture the 3D transformed elements as best as possible
         onclone: (clonedDoc) => {
+          sanitizeCanvasClone(clonedDoc);
           const shareBtn = clonedDoc.querySelector('[title="Invia su WhatsApp"]');
           if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
           
