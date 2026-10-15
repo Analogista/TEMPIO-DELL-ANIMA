@@ -1,134 +1,111 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Global Safety Net
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Helper functions
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // Admin check - checking specific verified emails
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
     function isAdmin() {
-      return isSignedIn() 
-        && request.auth.token.email_verified == true
-        && (request.auth.token.email == 'analogistabrindisi@gmail.com' || request.auth.token.email == 'infantinograziamaria@gmail.com');
+      return isSignedIn() && request.auth.token.email_verified == true
+        && (request.auth.token.email == 'analogistabrindisi@gmail.com'
+          || request.auth.token.email == 'infantinograziamaria@gmail.com');
     }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function hasTimestamp(data, field) { return data.get(field, null) == request.time; }
 
-    // Validation helpers
-    function isValidUserProfile(data) {
-      return data.keys().hasAll(['displayName', 'createdAt']) 
-        && data.keys().size() == 2
-        && data.displayName is string && data.displayName.size() <= 100
-        && data.createdAt == request.time;
-    }
-
-    function isValidUserPrivateInfo(data) {
-      return data.keys().hasAll(['email', 'nome', 'eta', 'sesso', 'updatedAt'])
-        && data.keys().size() == 5
-        && data.email == request.auth.token.email
+    function validProfile(data) {
+      return data.keys().hasAll(['nome', 'updatedAt'])
+        && data.keys().hasOnly(['nome', 'email', 'telefono', 'eta', 'citta', 'puntoRottura', 'photoUrls', 'updatedAt'])
         && data.nome is string && data.nome.size() <= 100
-        && data.eta is string && data.eta.size() <= 3
-        && data.sesso is string && data.sesso.size() <= 1
-        && data.updatedAt == request.time;
+        && data.get('email', '') is string && data.get('email', '') == request.auth.token.email
+        && data.get('telefono', '') is string && data.get('telefono', '').size() <= 30
+        && data.get('eta', '') is string && data.get('eta', '').size() <= 3
+        && data.get('citta', '') is string && data.get('citta', '').size() <= 100
+        && data.get('puntoRottura', '') is string && data.get('puntoRottura', '').size() <= 1000
+        && data.get('photoUrls', []) is list && data.get('photoUrls', []).size() <= 2
+        && hasTimestamp(data, 'updatedAt');
     }
-
-    function isValidRuneReading(data) {
+    function validRune(data) {
       return data.keys().hasAll(['question', 'runeIds', 'timestamp'])
-        && data.keys().size() == 3
+        && data.keys().hasOnly(['question', 'runeIds', 'runeNames', 'userName', 'userEmail', 'timestamp'])
         && data.question is string && data.question.size() <= 500
         && data.runeIds is list && data.runeIds.size() <= 24
-        && data.timestamp == request.time;
+        && data.get('runeNames', []) is list && data.get('runeNames', []).size() <= 24
+        && data.get('userName', '') is string && data.get('userName', '').size() <= 100
+        && data.get('userEmail', '') is string && data.get('userEmail', '') == request.auth.token.email
+        && hasTimestamp(data, 'timestamp');
     }
-
-    function isValidFlowerReading(data) {
+    function validFlower(data) {
       return data.keys().hasAll(['flowerIds', 'timestamp'])
-        && data.keys().size() == 2
+        && data.keys().hasOnly(['flowerIds', 'flowerNames', 'userName', 'userEmail', 'timestamp'])
         && data.flowerIds is list && data.flowerIds.size() <= 38
-        && data.timestamp == request.time;
+        && data.get('flowerNames', []) is list && data.get('flowerNames', []).size() <= 38
+        && data.get('userName', '') is string && data.get('userName', '').size() <= 100
+        && data.get('userEmail', '') is string && data.get('userEmail', '') == request.auth.token.email
+        && hasTimestamp(data, 'timestamp');
     }
-
-    function isValidConstellation(data) {
+    function validConstellation(data) {
       return data.keys().hasAll(['characters', 'timestamp'])
-        && data.keys().size() == 2
+        && data.keys().hasOnly(['characters', 'labels', 'userName', 'userEmail', 'timestamp'])
         && data.characters is list && data.characters.size() <= 50
-        && data.timestamp == request.time;
+        && data.get('labels', []) is list && data.get('labels', []).size() <= 50
+        && data.get('userName', '') is string && data.get('userName', '').size() <= 100
+        && data.get('userEmail', '') is string && data.get('userEmail', '') == request.auth.token.email
+        && hasTimestamp(data, 'timestamp');
     }
-
-    function isValidCandidacy(data) {
-      return data.keys().hasAll(['userId', 'nome', 'email', 'puntoRottura', 'radiceTempo', 'termometroUrgenza', 'obiettivoProfondo', 'pattoFiducia', 'rispettoSpazioSacro', 'portaleVisivo', 'status', 'createdAt'])
+    function validCandidacy(data) {
+      return data.keys().hasAll(['userId', 'nome', 'email', 'telefono', 'puntoRottura', 'radiceTempo', 'termometroUrgenza', 'obiettivoProfondo', 'pattoFiducia', 'rispettoSpazioSacro', 'portaleVisivo', 'message', 'photoUrls', 'status', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'nome', 'email', 'telefono', 'eta', 'citta', 'puntoRottura', 'radiceTempo', 'termometroUrgenza', 'obiettivoProfondo', 'pattoFiducia', 'rispettoSpazioSacro', 'portaleVisivo', 'message', 'photoUrls', 'status', 'createdAt'])
         && data.userId == request.auth.uid
         && data.nome is string && data.nome.size() <= 100
-        && data.email is string && data.email.size() <= 100
+        && data.email is string && data.email == request.auth.token.email
+        && data.telefono is string && data.telefono.size() <= 30
+        && data.get('eta', '') is string && data.get('eta', '').size() <= 3
+        && data.get('citta', '') is string && data.get('citta', '').size() <= 100
         && data.puntoRottura is string && data.puntoRottura.size() <= 1000
         && data.radiceTempo in ['meno_mese', 'qualche_mese', 'cronico']
         && data.termometroUrgenza is number && data.termometroUrgenza >= 1 && data.termometroUrgenza <= 10
         && data.obiettivoProfondo in ['sollievo', 'percorso']
-        && data.pattoFiducia is bool
-        && data.rispettoSpazioSacro is bool
-        && data.portaleVisivo is bool
-        && (data.get('message', '') is string && data.get('message', '').size() <= 2000)
-        && (data.get('photos', []) is list && data.get('photos', []).size() <= 4)
-        && data.status == 'pending'
-        && data.createdAt == request.time;
+        && data.pattoFiducia is bool && data.rispettoSpazioSacro is bool && data.portaleVisivo is bool
+        && data.message is string && data.message.size() <= 2000
+        && data.photoUrls is list && data.photoUrls.size() <= 2
+        && data.status == 'pending' && hasTimestamp(data, 'createdAt');
     }
 
-    // Rules for Users collection
+    match /{document=**} { allow read, write: if false; }
+
     match /users/{userId} {
-      // Profile data (merged public/private for simplicity as requested by app evolution)
       match /profile/data {
         allow read: if isOwner(userId) || isAdmin();
-        allow write: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validProfile(request.resource.data);
       }
-
       match /runeReadings/{readingId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && isValidId(readingId);
+        allow create: if isOwner(userId) && isValidId(readingId) && validRune(request.resource.data);
       }
-
       match /flowerReadings/{readingId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && isValidId(readingId);
+        allow create: if isOwner(userId) && isValidId(readingId) && validFlower(request.resource.data);
       }
-
       match /constellations/{constellationId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && isValidId(constellationId);
+        allow create: if isOwner(userId) && isValidId(constellationId) && validConstellation(request.resource.data);
       }
-
       match /candidacies/{candidacyId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && isValidId(candidacyId);
+        allow create: if isOwner(userId) && isValidId(candidacyId) && validCandidacy(request.resource.data);
       }
     }
 
-    // Global collections for Admin
     match /candidacies/{candidacyId} {
       allow read: if isAdmin();
-      allow create: if isSignedIn(); // Users can submit candidacies
+      allow create: if isSignedIn() && validCandidacy(request.resource.data);
       allow update, delete: if isAdmin();
     }
-
     match /allReadings/{readingId} {
       allow read: if isAdmin();
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['question', 'runeIds', 'runeNames', 'flowerIds', 'flowerNames', 'characters', 'labels', 'userName', 'userEmail', 'timestamp', 'type', 'userId']);
       allow update, delete: if isAdmin();
     }
-    
-    // Admins collection
-    match /admins/{adminId} {
-      allow read: if isSignedIn();
-    }
+    match /admins/{adminId} { allow read: if isAdmin(); }
   }
 }

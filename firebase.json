@@ -1,0 +1,10 @@
+{
+  "firestore": {
+    "database": "ai-studio-remixrisolutrice-4e2bf75f-faba-438e-9632-9bbfc8819085",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

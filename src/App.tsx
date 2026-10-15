@@ -230,7 +230,7 @@ export default function App() {
     if (!isAdmin) return;
     setIsAdminLoading(true);
     try {
-      const cSnap = await getDocs(query(collection(db, 'candidacies'), orderBy('timestamp', 'desc')));
+      const cSnap = await getDocs(query(collection(db, 'candidacies'), orderBy('createdAt', 'desc')));
       const rSnap = await getDocs(query(collection(db, 'allReadings'), orderBy('timestamp', 'desc')));
       setAdminData({
         candidacies: cSnap.docs.map(d => ({ id: d.id, ...d.data() })),
@@ -471,18 +471,19 @@ export default function App() {
       
       // Upload photos to storage
       for (const file of candidacyFiles) {
-        const fileRef = ref(storage, `candidacies/${user.uid}/${Date.now()}_${file.name}`);
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const fileRef = ref(storage, `candidacies/${user.uid}/${crypto.randomUUID()}_${safeName}`);
         try {
           const snapshot = await uploadBytes(fileRef, file);
           const url = await getDownloadURL(snapshot.ref);
           uploadedUrls.push(url);
         } catch (uploadError: any) {
           console.error("Firebase Storage Upload Error:", uploadError);
-          throw new Error(`Errore caricamento foto (${file.name}): ${uploadError.message}. Verifica di aver attivato lo Storage nella console Firebase (clicca 'Continua' e poi seleziona 'Inizia in modalità di test').`);
+          throw new Error(`Errore caricamento foto (${file.name}): ${uploadError.message}. Verifica che Firebase Storage sia attivo nel progetto app-utili-508807.`);
         }
       }
 
-      // Save Profile Data
+      // Save profile and both candidature views atomically.
       const profileData = {
         nome: candidacyForm.nome,
         email: candidacyForm.email,
@@ -490,26 +491,22 @@ export default function App() {
         eta: candidacyForm.eta,
         citta: candidacyForm.citta,
         puntoRottura: candidacyForm.puntoRottura,
-        photoUrls: uploadedUrls, // Save photos to profile as well
+        photoUrls: uploadedUrls,
         updatedAt: serverTimestamp()
       };
-      await setDoc(doc(db, 'users', user.uid, 'profile', 'data'), profileData);
-      setUserProfile(profileData);
-
-      // Save to global candidacy collection for Admin
-      await addDoc(collection(db, 'candidacies'), {
+      const candidacyData = {
         ...candidacyForm,
         userId: user.uid,
         photoUrls: uploadedUrls,
-        timestamp: serverTimestamp()
-      });
-
-      // Save to user's local collection
-      await addDoc(collection(db, 'users', user.uid, 'candidacies'), {
-        ...candidacyForm,
-        photoUrls: uploadedUrls,
-        timestamp: serverTimestamp()
-      });
+        status: 'pending',
+        createdAt: serverTimestamp()
+      };
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'users', user.uid, 'profile', 'data'), profileData);
+      batch.set(doc(collection(db, 'candidacies')), candidacyData);
+      batch.set(doc(collection(db, 'users', user.uid, 'candidacies')), candidacyData);
+      await batch.commit();
+      setUserProfile(profileData);
 
       // Determine result
       const isComplex = candidacyForm.termometroUrgenza >= 9 || candidacyForm.radiceTempo === 'cronico';
@@ -1116,7 +1113,7 @@ export default function App() {
                                 <div className="flex flex-wrap gap-2 mt-3">
                                   {can.eta && <span className="text-[10px] bg-[#4a3f35] text-white px-3 py-1 rounded-full uppercase font-bold tracking-widest">{can.eta} anni</span>}
                                   {can.citta && <span className="text-[10px] bg-[#f8f5f0] text-[#4a3f35] border border-[#e5e0d8] px-3 py-1 rounded-full uppercase font-bold tracking-widest">{can.citta}</span>}
-                                  {can.timestamp && <span className="text-[10px] opacity-40 uppercase font-black tracking-widest flex items-center gap-1"><Clock size={10} /> {can.timestamp.toDate().toLocaleDateString('it-IT')}</span>}
+                                  {can.createdAt && <span className="text-[10px] opacity-40 uppercase font-black tracking-widest flex items-center gap-1"><Clock size={10} /> {can.createdAt.toDate().toLocaleDateString('it-IT')}</span>}
                                 </div>
                               </div>
                             </div>
