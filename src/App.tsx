@@ -218,6 +218,7 @@ export default function App() {
   const [selectedCandidacies, setSelectedCandidacies] = useState<string[]>([]);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const isAdmin = user?.email === 'analogistabrindisi@gmail.com' || user?.email === 'infantinograziamaria@gmail.com';
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showCandidacyModal, setShowCandidacyModal] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<'standard' | 'complex' | null>(null);
@@ -294,6 +295,12 @@ export default function App() {
       setIsAdminLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (currentPage === 'admin' && isAdmin) {
+      fetchAdminData();
+    }
+  }, [currentPage, isAdmin]);
 
   const updateCandidacyNote = async (id: string, note: string) => {
     try {
@@ -399,8 +406,6 @@ export default function App() {
 
   const logout = () => signOut(auth);
 
-  // Admin logic
-  const isAdmin = user?.email === 'analogistabrindisi@gmail.com' || user?.email === 'infantinograziamaria@gmail.com';
   const [userProfile, setUserProfile] = useState<any>(null);
 
   // Load user profile
@@ -1122,6 +1127,45 @@ export default function App() {
                     <Info className="mx-auto mb-2 text-[#c2b280]" size={20} />
                     <p className="text-[10px] uppercase tracking-widest opacity-60 font-bold mb-1">Nota</p>
                     <p className="text-xs italic opacity-50 px-4">Utilizza la dashboard per gestire le prenotazioni e il contatto diretto via WhatsApp.</p>
+                  </div>
+                </div>
+
+                {/* Constellations received independently from candidacies */}
+                <div className="space-y-4 mb-10">
+                  <div className="flex items-center justify-between bg-[#fdfbf7] p-4 rounded-2xl border border-[#e5e0d8]">
+                    <h3 className="font-bold uppercase tracking-[0.2em] text-[#c2b280] text-xs flex items-center gap-2">
+                      <Share2 size={14} /> Costellazioni ricevute
+                    </h3>
+                    <span className="text-[10px] opacity-50">{adminData.readings.filter(read => read.type === 'constellation').length} totali</span>
+                  </div>
+                  <div className="space-y-3">
+                    {adminData.readings.filter(read => read.type === 'constellation').map(read => (
+                      <div key={`standalone-${read.id}`} className="p-5 bg-white rounded-2xl border border-[#e5e0d8] shadow-sm">
+                        <div className="flex flex-wrap justify-between gap-2 mb-3">
+                          <div>
+                            <p className="font-bold text-[#4a3f35]">{read.userName || 'Utente senza nome'}</p>
+                            <p className="text-[10px] opacity-50">{read.userEmail || 'Email non disponibile'}</p>
+                          </div>
+                          <span className="text-[9px] opacity-50">{read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recente'}</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {(read.characters || []).map((character: CharacterType, index: number) => {
+                            const position = describeCharacterPosition(read.characters as PositionCharacter[], character.id);
+                            return (
+                              <div key={`${read.id}-standalone-${index}`} className="p-3 rounded-xl bg-[#fdfbf7] border border-[#e5e0d8] text-[10px]">
+                                <p className="font-bold text-[#4a3f35]">{character.label || 'Senza nome'}</p>
+                                <p className="opacity-70">{position ? `${position.stair} · ${position.position} · ${position.horizontal}` : 'Posizione non determinata'}</p>
+                                {character.feeling && <p className="opacity-60">Emozione: {character.feeling}</p>}
+                                {character.memory && <p className="opacity-60 italic">Memoria: {character.memory}</p>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    {adminData.readings.filter(read => read.type === 'constellation').length === 0 && (
+                      <p className="text-[10px] opacity-40 italic text-center py-4">Nessuna costellazione ricevuta.</p>
+                    )}
                   </div>
                 </div>
 
