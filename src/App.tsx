@@ -202,7 +202,6 @@ export default function App() {
   const [showPicker, setShowPicker] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [workflowStep, setWorkflowStep] = useState(0); // 0: Placement, 1: Analysis
-  const [selectedStair, setSelectedStair] = useState<'upper' | 'lower'>('upper');
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [analyzingCharacter, setAnalyzingCharacter] = useState<CharacterType | null>(null);
   const [tempMemory, setTempMemory] = useState('');
@@ -709,7 +708,6 @@ export default function App() {
       label: tempLabel || "Sconosciuto",
       x: 0,
       y: 0, // Appear at the center of the board, between the platforms
-      stair: selectedStair,
     };
 
     setCharacters([...characters, newChar]);
@@ -1782,29 +1780,6 @@ export default function App() {
                 </p>
               </div>
               
-              <div className="flex flex-col items-center gap-2 w-full max-w-4xl justify-center flex-wrap mt-2">
-                <div className="flex items-center gap-2 rounded-full bg-[#fdfbf7] border border-[#e5e0d8] p-1 shadow-sm">
-                  <span className="px-3 text-[9px] font-black uppercase tracking-widest text-[#5a5a40]">Piano della figura</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStair('upper')}
-                    disabled={workflowStep === 1}
-                    className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-wider transition-all ${selectedStair === 'upper' ? 'bg-[#4c513c] text-white shadow-sm' : 'text-[#5a5a40] hover:bg-white'}`}
-                  >
-                    Superiore / posteriore
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStair('lower')}
-                    disabled={workflowStep === 1}
-                    className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-wider transition-all ${selectedStair === 'lower' ? 'bg-[#4c513c] text-white shadow-sm' : 'text-[#5a5a40] hover:bg-white'}`}
-                  >
-                    Inferiore / anteriore
-                  </button>
-                </div>
-                <p className="text-[9px] opacity-60 italic">Seleziona il piano prima di aggiungere ogni figura. L’ordine verrà calcolato da sinistra verso destra.</p>
-              </div>
-
               <div className="flex items-center gap-3 w-full max-w-4xl justify-center flex-wrap mt-2">
                 {/* Group: Creation */}
                 <div className="flex gap-2">
