@@ -64,6 +64,7 @@ type CharacterType = {
   label: string;
   x: number;
   y: number;
+  stair?: 'upper' | 'lower';
   feeling?: 'piacevole' | 'spiacevole';
   memory?: string;
 };
@@ -142,6 +143,57 @@ const PREDEFINED_LABELS = [
   "Partner", "Figlio", "Figlia", "Amico", "Lavoro", "Paura", "Sogno"
 ];
 
+type PositionCharacter = Pick<CharacterType, 'id' | 'x' | 'y' | 'stair' | 'memory'>;
+
+function resolveCharacterStair(character: PositionCharacter) {
+  if (character.stair === 'upper' || character.stair === 'lower') {
+    return { value: character.stair, method: 'explicit' as const };
+  }
+
+  const memory = (character.memory || '').toLowerCase();
+  if (memory.includes('gradino superiore')) {
+    return { value: 'upper' as const, method: 'estimated' as const };
+  }
+  if (memory.includes('gradino inferiore')) {
+    return { value: 'lower' as const, method: 'estimated' as const };
+  }
+
+  return { value: 'unknown' as const, method: 'unknown' as const };
+}
+
+function describeHorizontalPosition(index: number, total: number) {
+  const ratio = total <= 1 ? 0.5 : index / (total - 1);
+  if (ratio < 0.15) return 'estrema sinistra';
+  if (ratio < 0.35) return 'sinistra';
+  if (ratio < 0.5) return 'centro-sinistra';
+  if (ratio <= 0.65) return 'centro';
+  if (ratio <= 0.85) return 'destra';
+  return 'estrema destra';
+}
+
+function describeCharacterPosition(characters: PositionCharacter[], targetId: string) {
+  const target = characters.find(character => character.id === targetId);
+  if (!target) return null;
+
+  const targetStair = resolveCharacterStair(target);
+  if (targetStair.value === 'unknown') {
+    return { stair: 'non determinato', position: 'non determinata', horizontal: 'non determinata', method: targetStair.method };
+  }
+
+  const sameStair = characters
+    .filter(character => resolveCharacterStair(character).value === targetStair.value)
+    .sort((a, b) => a.x - b.x);
+  const zeroBasedIndex = sameStair.findIndex(character => character.id === targetId);
+  if (zeroBasedIndex < 0) return null;
+
+  return {
+    stair: targetStair.value === 'upper' ? 'superiore' : 'inferiore',
+    position: `${zeroBasedIndex + 1} di ${sameStair.length}`,
+    horizontal: describeHorizontalPosition(zeroBasedIndex, sameStair.length),
+    method: targetStair.method
+  };
+}
+
 export default function App() {
   const [characters, setCharacters] = useState<CharacterType[]>([]);
   const [drawingCharacter, setDrawingCharacter] = useState<{ shape: string, color: string } | null>(null);
@@ -150,6 +202,7 @@ export default function App() {
   const [showPicker, setShowPicker] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [workflowStep, setWorkflowStep] = useState(0); // 0: Placement, 1: Analysis
+  const [selectedStair, setSelectedStair] = useState<'upper' | 'lower'>('upper');
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [analyzingCharacter, setAnalyzingCharacter] = useState<CharacterType | null>(null);
   const [tempMemory, setTempMemory] = useState('');
@@ -426,13 +479,14 @@ export default function App() {
   const saveConstellation = async (chars: CharacterType[]) => {
     if (!user || chars.length === 0) return false;
     try {
-      const savedCharacters = chars.map(({ id, shape, color, label, x, y, feeling, memory }) => ({
+      const savedCharacters = chars.map(({ id, shape, color, label, x, y, stair, feeling, memory }) => ({
         id,
         shape,
         color,
         label,
         x,
         y,
+        ...(stair ? { stair } : {}),
         ...(feeling ? { feeling } : {}),
         ...(memory ? { memory } : {})
       }));
@@ -619,6 +673,7 @@ export default function App() {
       label: tempLabel || "Sconosciuto",
       x: 0,
       y: 0, // Appear at the center of the board, between the platforms
+      stair: selectedStair,
     };
 
     setCharacters([...characters, newChar]);
@@ -1259,7 +1314,15 @@ export default function App() {
                                                 <span className="font-bold text-[#4a3f35]">{character.label || 'Senza nome'}</span>
                                                 {character.feeling && <span> · Emozione: {character.feeling}</span>}
                                                 {character.memory && <span> · Memoria: {character.memory}</span>}
-                                                <span className="block opacity-50">Posizione: {Math.round(character.x)}, {Math.round(character.y)}</span>
+                                                {(() => {
+                                                  const position = describeCharacterPosition(read.characters as PositionCharacter[], character.id);
+                                                  return position ? (
+                                                    <>
+                                                      <span className="block text-[#5a5a40]">{position.stair} · {position.position} · {position.horizontal}</span>
+                                                      <span className="block opacity-50">Coordinate tecniche: {Math.round(character.x)}, {Math.round(character.y)}{position.method === 'estimated' ? ' · gradino stimato' : ''}</span>
+                                                    </>
+                                                  ) : null;
+                                                })()}
                                               </div>
                                             ))}
                                           </div>
@@ -1634,6 +1697,29 @@ export default function App() {
                 </p>
               </div>
               
+              <div className="flex flex-col items-center gap-2 w-full max-w-4xl justify-center flex-wrap mt-2">
+                <div className="flex items-center gap-2 rounded-full bg-[#fdfbf7] border border-[#e5e0d8] p-1 shadow-sm">
+                  <span className="px-3 text-[9px] font-black uppercase tracking-widest text-[#5a5a40]">Piano della figura</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStair('upper')}
+                    disabled={workflowStep === 1}
+                    className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-wider transition-all ${selectedStair === 'upper' ? 'bg-[#4c513c] text-white shadow-sm' : 'text-[#5a5a40] hover:bg-white'}`}
+                  >
+                    Superiore / posteriore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStair('lower')}
+                    disabled={workflowStep === 1}
+                    className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-wider transition-all ${selectedStair === 'lower' ? 'bg-[#4c513c] text-white shadow-sm' : 'text-[#5a5a40] hover:bg-white'}`}
+                  >
+                    Inferiore / anteriore
+                  </button>
+                </div>
+                <p className="text-[9px] opacity-60 italic">Seleziona il piano prima di aggiungere ogni figura. L’ordine verrà calcolato da sinistra verso destra.</p>
+              </div>
+
               <div className="flex items-center gap-3 w-full max-w-4xl justify-center flex-wrap mt-2">
                 {/* Group: Creation */}
                 <div className="flex gap-2">
