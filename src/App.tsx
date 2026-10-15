@@ -53,7 +53,7 @@ import {
   deleteDoc,
   writeBatch
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { auth, db, storage, handleFirestoreError } from './lib/firebase';
 
 // Types for our game
@@ -361,6 +361,27 @@ export default function App() {
     } catch (e) {
       console.error("Error deleting candidacy:", e);
       alert("Errore nell'eliminazione.");
+    }
+  };
+
+  const deleteReading = async (reading: any) => {
+    if (!confirm('Vuoi eliminare questa lettura dall’area admin? L’operazione non può essere annullata.')) return;
+    try {
+      if (reading.screenshotUrl) {
+        try {
+          await deleteObject(ref(storage, reading.screenshotUrl));
+        } catch (storageError) {
+          console.warn('Screenshot già assente o non eliminabile:', storageError);
+        }
+      }
+      await deleteDoc(doc(db, 'allReadings', reading.id));
+      setAdminData(prev => ({
+        ...prev,
+        readings: prev.readings.filter(item => item.id !== reading.id)
+      }));
+    } catch (error) {
+      console.error('Errore eliminazione lettura:', error);
+      alert('Non è stato possibile eliminare la lettura dall’area admin.');
     }
   };
 
@@ -1212,7 +1233,12 @@ export default function App() {
                             <p className="font-bold text-[#4a3f35]">{read.userName || 'Utente senza nome'}</p>
                             <p className="text-[10px] opacity-50">{read.userEmail || 'Email non disponibile'}</p>
                           </div>
-                          <span className="text-[9px] opacity-50">{read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recente'}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[9px] opacity-50">{read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recente'}</span>
+                            <button type="button" onClick={() => deleteReading(read)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full" title="Elimina lettura">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
                         {read.screenshotUrl && (
                           <button
@@ -1417,9 +1443,14 @@ export default function App() {
                                         }`}>
                                           {read.type}
                                         </span>
-                                        <span className="text-[8px] opacity-40 font-bold">
-                                          {read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recent'}
-                                        </span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[8px] opacity-40 font-bold">
+                                            {read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recent'}
+                                          </span>
+                                          <button type="button" onClick={() => deleteReading(read)} className="p-1 text-red-400 hover:text-red-600" title="Elimina lettura">
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </div>
                                       </div>
                                       {read.question && <p className="text-[10px] italic opacity-80 mb-2">"{read.question}"</p>}
                                       {read.type === 'constellation' && Array.isArray(read.characters) ? (
