@@ -1881,7 +1881,7 @@ export default function App() {
                               await fetchHistory(user.uid);
                               alert(screenshotUrl
                                 ? "Costellazione salvata. L’immagine è stata inviata anche all’area admin."
-                                : "Costellazione salvata nell’area admin, ma lo screenshot non è stato generato. Puoi comunque inviare il report e riprovare l’immagine.");
+                                : "Costellazione salvata nell’area admin, ma lo screenshot automatico non è stato generato. Fai ora uno screenshot manuale del piano, poi allegalo e invialo separatamente su WhatsApp a Graziamaria insieme al report.");
                             }
                           } catch (error: any) {
                             console.error('Errore salvataggio costellazione:', error);
