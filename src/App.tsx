@@ -460,7 +460,8 @@ export default function App() {
       return;
     }
 
-    if (candidacyFiles.length < 2) {
+    const savedPhotoCount = userProfile?.photoUrls?.length || 0;
+    if (savedPhotoCount + candidacyFiles.length < 2) {
       alert("Per favore, carica almeno 2 foto della pianta dei tuoi piedi (sinistro e destro) per procedere.");
       return;
     }
