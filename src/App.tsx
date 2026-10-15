@@ -481,7 +481,37 @@ export default function App() {
     }
   };
 
-  const saveConstellation = async (chars: CharacterType[]) => {
+  const captureConstellationBlob = async () => {
+    if (!boardRef.current) return null;
+    const canvas = await html2canvas(boardRef.current, {
+      backgroundColor: '#f8f5f0',
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      allowTaint: true,
+      onclone: (clonedDoc) => {
+        const shareBtn = clonedDoc.querySelector('[title="Invia a Graziamaria"]');
+        if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
+        const main = clonedDoc.querySelector('main');
+        if (main) {
+          main.style.perspective = 'none';
+          main.style.overflow = 'visible';
+        }
+      }
+    });
+    return new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png', 0.9));
+  };
+
+  const uploadConstellationScreenshot = async () => {
+    if (!user) throw new Error('Utente non autenticato.');
+    const blob = await captureConstellationBlob();
+    if (!blob) throw new Error('Impossibile generare l’immagine della costellazione.');
+    const screenshotRef = ref(storage, `constellations/${user.uid}/${crypto.randomUUID()}_costellazione.png`);
+    await uploadBytes(screenshotRef, blob, { contentType: 'image/png' });
+    return getDownloadURL(screenshotRef);
+  };
+
+  const saveConstellation = async (chars: CharacterType[], screenshotUrl?: string) => {
     if (!user || chars.length === 0) return false;
     try {
       const savedCharacters = chars.map(({ id, shape, color, label, x, y, stair, feeling, memory }) => ({
@@ -499,6 +529,7 @@ export default function App() {
       const dataToSave = {
         characters: savedCharacters,
         labels: characterLabels,
+        ...(screenshotUrl ? { screenshotUrl } : {}),
         userName: userProfile?.nome || user.displayName,
         userEmail: user.email,
         timestamp: serverTimestamp()
@@ -1148,6 +1179,16 @@ export default function App() {
                           </div>
                           <span className="text-[9px] opacity-50">{read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recente'}</span>
                         </div>
+                        {read.screenshotUrl && (
+                          <button
+                            type="button"
+                            onClick={() => window.open(read.screenshotUrl, '_blank')}
+                            className="block w-full mb-4 rounded-2xl overflow-hidden border border-[#e5e0d8] bg-[#f8f5f0]"
+                            title="Apri immagine della costellazione"
+                          >
+                            <img src={read.screenshotUrl} alt="Costellazione del cliente" className="w-full max-h-[360px] object-contain" referrerPolicy="no-referrer" />
+                          </button>
+                        )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                           {(read.characters || []).map((character: CharacterType, index: number) => {
                             const position = describeCharacterPosition(read.characters as PositionCharacter[], character.id);
@@ -1818,10 +1859,11 @@ export default function App() {
                         onClick={async () => {
                           if (!user) { alert("Effettua il login per salvare."); return; }
                           try {
-                            const saved = await saveConstellation(characters);
+                            const screenshotUrl = await uploadConstellationScreenshot();
+                            const saved = await saveConstellation(characters, screenshotUrl);
                             if (saved) {
                               await fetchHistory(user.uid);
-                              alert("Costellazione salvata in Area Personale!");
+                              alert("Costellazione salvata. L’immagine è stata inviata anche all’area admin.");
                             }
                           } catch (error: any) {
                             console.error('Errore salvataggio costellazione:', error);
