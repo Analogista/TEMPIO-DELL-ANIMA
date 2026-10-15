@@ -158,7 +158,12 @@ function resolveCharacterStair(character: PositionCharacter) {
     return { value: 'lower' as const, method: 'estimated' as const };
   }
 
-  return { value: 'unknown' as const, method: 'unknown' as const };
+  // Legacy fallback: the original visual board has no explicit stair field.
+  // Keep this visibly marked as estimated and retain the raw coordinates below.
+  return {
+    value: character.y < -80 ? 'upper' as const : 'lower' as const,
+    method: 'estimated' as const
+  };
 }
 
 function describeHorizontalPosition(index: number, total: number) {
@@ -176,10 +181,6 @@ function describeCharacterPosition(characters: PositionCharacter[], targetId: st
   if (!target) return null;
 
   const targetStair = resolveCharacterStair(target);
-  if (targetStair.value === 'unknown') {
-    return { stair: 'non determinato', position: 'non determinata', horizontal: 'non determinata', method: targetStair.method };
-  }
-
   const sameStair = characters
     .filter(character => resolveCharacterStair(character).value === targetStair.value)
     .sort((a, b) => a.x - b.x);
