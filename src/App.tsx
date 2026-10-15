@@ -450,6 +450,21 @@ export default function App() {
       return;
     }
 
+    let profilePhotoUrls: string[] = Array.isArray(userProfile?.photoUrls)
+      ? userProfile.photoUrls.filter((url: unknown): url is string => typeof url === 'string' && url.length > 0)
+      : [];
+    try {
+      const freshProfile = await getDoc(doc(db, 'users', user.uid, 'profile', 'data'));
+      if (freshProfile.exists()) {
+        const freshPhotoUrls = freshProfile.data().photoUrls;
+        if (Array.isArray(freshPhotoUrls)) {
+          profilePhotoUrls = freshPhotoUrls.filter((url: unknown): url is string => typeof url === 'string' && url.length > 0);
+        }
+      }
+    } catch (profileError) {
+      console.error('Error refreshing profile before candidacy:', profileError);
+    }
+
     if (!candidacyForm.nome || !candidacyForm.email || !candidacyForm.telefono || !candidacyForm.puntoRottura) {
       alert("Nome, Email, Telefono e Descrizione del fastidio sono obbligatori.");
       return;
@@ -460,15 +475,14 @@ export default function App() {
       return;
     }
 
-    const savedPhotoCount = userProfile?.photoUrls?.length || 0;
-    if (savedPhotoCount + candidacyFiles.length < 2) {
+    if (profilePhotoUrls.length + candidacyFiles.length < 2) {
       alert("Per favore, carica almeno 2 foto della pianta dei tuoi piedi (sinistro e destro) per procedere.");
       return;
     }
 
     setIsSubmittingCandidacy(true);
     try {
-      const uploadedUrls: string[] = [...(userProfile?.photoUrls || [])];
+      const uploadedUrls: string[] = [...profilePhotoUrls];
       
       // Upload photos to storage
       for (const file of candidacyFiles) {
@@ -482,6 +496,10 @@ export default function App() {
           console.error("Firebase Storage Upload Error:", uploadError);
           throw new Error(`Errore caricamento foto (${file.name}): ${uploadError.message}. Verifica che Firebase Storage sia attivo nel progetto app-utili-508807.`);
         }
+      }
+
+      if (uploadedUrls.length < 2) {
+        throw new Error('Sono necessarie almeno 2 foto valide della pianta dei piedi.');
       }
 
       // Save profile and both candidature views atomically.
