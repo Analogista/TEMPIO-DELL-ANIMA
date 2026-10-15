@@ -132,6 +132,10 @@
         "timestamp": {
           "type": "string",
           "format": "date-time"
+        },
+        "userData": {
+          "type": "object",
+          "description": "Dati inseriti dall’utente nella sessione della costellazione."
         }
       },
       "required": [

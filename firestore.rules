@@ -44,9 +44,10 @@ service cloud.firestore {
     }
     function validConstellation(data) {
       return data.keys().hasAll(['characters', 'timestamp'])
-        && data.keys().hasOnly(['characters', 'labels', 'userName', 'userEmail', 'timestamp'])
+        && data.keys().hasOnly(['characters', 'labels', 'userData', 'userName', 'userEmail', 'timestamp'])
         && data.characters is list && data.characters.size() <= 50
         && data.get('labels', []) is list && data.get('labels', []).size() <= 50
+        && data.get('userData', {}) is map
         && data.get('userName', '') is string && data.get('userName', '').size() <= 100
         && data.get('userEmail', '') is string && data.get('userEmail', '') == request.auth.token.email
         && hasTimestamp(data, 'timestamp');
@@ -103,7 +104,7 @@ service cloud.firestore {
     match /allReadings/{readingId} {
       allow read: if isAdmin();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
-        && request.resource.data.keys().hasOnly(['question', 'runeIds', 'runeNames', 'flowerIds', 'flowerNames', 'characters', 'labels', 'userName', 'userEmail', 'timestamp', 'type', 'userId']);
+        && request.resource.data.keys().hasOnly(['question', 'runeIds', 'runeNames', 'flowerIds', 'flowerNames', 'characters', 'labels', 'userData', 'userName', 'userEmail', 'timestamp', 'type', 'userId']);
       allow update, delete: if isAdmin();
     }
     match /admins/{adminId} { allow read: if isAdmin(); }

@@ -430,6 +430,7 @@ export default function App() {
       const dataToSave = {
         characters: chars,
         labels: characterLabels,
+        userData,
         userName: userProfile?.nome || user.displayName,
         userEmail: user.email,
         timestamp: serverTimestamp()
@@ -1232,11 +1233,30 @@ export default function App() {
                                         </span>
                                       </div>
                                       {read.question && <p className="text-[10px] italic opacity-80 mb-2">"{read.question}"</p>}
-                                      <div className="text-[10px] font-medium opacity-70 leading-relaxed">
-                                        {Array.isArray(read.data) ? read.data.join(', ') : 
-                                         read.runeIds ? `Rune: ${read.runeIds.map((id: number) => RUNES.find(r => r.id === id)?.name).filter(Boolean).join(', ')}` :
-                                         read.flowerIds ? `Fiori: ${read.flowerIds.map((id: number) => BACH_FLOWERS.find(f => f.id === id)?.name).filter(Boolean).join(', ')}` : 'Analisi Complessa'}
-                                      </div>
+                                      {read.type === 'constellation' && Array.isArray(read.characters) ? (
+                                        <div className="space-y-2 text-[10px] font-medium opacity-70 leading-relaxed">
+                                          {read.userData && (
+                                            <p><strong>Dati sessione:</strong> {read.userData.nome || read.userName || 'N/D'}{read.userData.eta ? `, ${read.userData.eta} anni` : ''}{read.userData.sesso ? `, ${read.userData.sesso}` : ''}{read.userData.domandaRune ? ` — ${read.userData.domandaRune}` : ''}</p>
+                                          )}
+                                          <p><strong>Elementi posizionati:</strong> {read.characters.length}</p>
+                                          <div className="space-y-1">
+                                            {read.characters.map((character: CharacterType, index: number) => (
+                                              <div key={`${read.id}-character-${index}`} className="rounded-xl bg-white/70 border border-[#e5e0d8] p-2">
+                                                <span className="font-bold text-[#4a3f35]">{character.label || 'Senza nome'}</span>
+                                                {character.feeling && <span> · Emozione: {character.feeling}</span>}
+                                                {character.memory && <span> · Memoria: {character.memory}</span>}
+                                                <span className="block opacity-50">Posizione: {Math.round(character.x)}, {Math.round(character.y)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="text-[10px] font-medium opacity-70 leading-relaxed">
+                                          {Array.isArray(read.data) ? read.data.join(', ') :
+                                           read.runeIds ? `Rune: ${read.runeIds.map((id: number) => RUNES.find(r => r.id === id)?.name).filter(Boolean).join(', ')}` :
+                                           read.flowerIds ? `Fiori: ${read.flowerIds.map((id: number) => BACH_FLOWERS.find(f => f.id === id)?.name).filter(Boolean).join(', ')}` : 'Analisi Complessa'}
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                   {userReadings.length === 0 && (
