@@ -424,19 +424,33 @@ export default function App() {
   };
 
   const saveConstellation = async (chars: CharacterType[]) => {
-    if (!user) return;
+    if (!user || chars.length === 0) return false;
     try {
-      const characterLabels = chars.map(c => c.label).filter(Boolean);
+      const savedCharacters = chars.map(({ id, shape, color, label, x, y, feeling, memory }) => ({
+        id,
+        shape,
+        color,
+        label,
+        x,
+        y,
+        ...(feeling ? { feeling } : {}),
+        ...(memory ? { memory } : {})
+      }));
+      const characterLabels = savedCharacters.map(c => c.label).filter(Boolean);
       const dataToSave = {
-        characters: chars,
+        characters: savedCharacters,
         labels: characterLabels,
-        userData,
         userName: userProfile?.nome || user.displayName,
         userEmail: user.email,
         timestamp: serverTimestamp()
       };
-      await addDoc(collection(db, 'users', user.uid, 'constellations'), dataToSave);
-      await addDoc(collection(db, 'allReadings'), { ...dataToSave, type: 'constellation', userId: user.uid });
+      const personalRef = doc(collection(db, 'users', user.uid, 'constellations'));
+      const globalRef = doc(collection(db, 'allReadings'));
+      const batch = writeBatch(db);
+      batch.set(personalRef, dataToSave);
+      batch.set(globalRef, { ...dataToSave, type: 'constellation', userId: user.uid });
+      await batch.commit();
+      return true;
     } catch (e) {
       handleFirestoreError(e, 'create', `users/${user.uid}/constellations`);
     }
@@ -1673,9 +1687,16 @@ export default function App() {
                       <button 
                         onClick={async () => {
                           if (!user) { alert("Effettua il login per salvare."); return; }
-                          await saveConstellation(characters);
-                          alert("Costellazione salvata in Area Personale!");
-                          if (user) fetchHistory(user.uid);
+                          try {
+                            const saved = await saveConstellation(characters);
+                            if (saved) {
+                              await fetchHistory(user.uid);
+                              alert("Costellazione salvata in Area Personale!");
+                            }
+                          } catch (error: any) {
+                            console.error('Errore salvataggio costellazione:', error);
+                            alert(`Impossibile salvare la costellazione. ${error?.message || 'Controlla il collegamento Firebase.'}`);
+                          }
                         }}
                         className="flex items-center justify-center gap-2 bg-[#c2b280] text-white transition-all shadow-lg hover:bg-[#b1a170] px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                         translate="no"
