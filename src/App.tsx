@@ -47,7 +47,6 @@ import {
   getDoc,
   getDocs,
   query,
-  where,
   orderBy,
   serverTimestamp,
   updateDoc,
@@ -317,8 +316,7 @@ export default function App() {
         // Fetch User Candidacies
         try {
           const q = query(
-            collection(db, 'candidacies'), 
-            where('userId', '==', u.uid),
+            collection(db, 'users', u.uid, 'candidacies'),
             orderBy('createdAt', 'desc')
           );
           const snapshot = await getDocs(q);
