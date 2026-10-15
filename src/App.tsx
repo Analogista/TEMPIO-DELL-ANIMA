@@ -1874,7 +1874,7 @@ export default function App() {
                         translate="no"
                       >
                         <Check size={14} />
-                        <span>Salva</span>
+                        <span>Salva e invia immagine</span>
                       </button>
                     </div>
                   )}
