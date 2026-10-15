@@ -201,6 +201,31 @@ function sanitizeCanvasClone(clonedDoc: Document) {
       .replace(/color-mix\([^;{}]*\)/gi, 'rgba(0, 0, 0, 0.35)')
       .replace(/oklab\([^)]*\)/gi, '#777777');
   });
+
+  const fallbackFor = (property: string) => {
+    if (property.includes('shadow')) return 'none';
+    if (property.includes('background')) return 'transparent';
+    if (property.includes('border') || property.includes('outline')) return '#e5e0d8';
+    if (property === 'color' || property.includes('text')) return '#4a3f35';
+    if (property === 'fill' || property === 'stroke') return '#4a3f35';
+    return 'transparent';
+  };
+
+  clonedDoc.querySelectorAll<HTMLElement>('*').forEach(element => {
+    const computed = clonedDoc.defaultView?.getComputedStyle(element);
+    if (!computed) return;
+    for (let index = 0; index < computed.length; index += 1) {
+      const property = computed.item(index);
+      const value = computed.getPropertyValue(property);
+      if (/oklab|color-mix/i.test(value)) {
+        element.style.setProperty(property, fallbackFor(property), 'important');
+      }
+    }
+  });
+
+  const safeStyle = clonedDoc.createElement('style');
+  safeStyle.textContent = `*::before, *::after { border-color: #e5e0d8 !important; box-shadow: none !important; }`;
+  clonedDoc.head.appendChild(safeStyle);
 }
 
 export default function App() {
