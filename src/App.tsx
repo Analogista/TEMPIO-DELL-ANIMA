@@ -202,7 +202,8 @@ export default function App() {
   const [showPicker, setShowPicker] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [workflowStep, setWorkflowStep] = useState(0); // 0: Placement, 1: Analysis
-  const [selectedStair, setSelectedStair] = useState<'upper' | 'lower'>('upper');
+  const upperPlatformRef = useRef<HTMLDivElement>(null);
+  const lowerPlatformRef = useRef<HTMLDivElement>(null);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [analyzingCharacter, setAnalyzingCharacter] = useState<CharacterType | null>(null);
   const [tempMemory, setTempMemory] = useState('');
@@ -678,7 +679,7 @@ export default function App() {
       label: tempLabel || "Sconosciuto",
       x: 0,
       y: 0, // Appear at the center of the board, between the platforms
-      stair: selectedStair,
+      stair: 'upper',
     };
 
     setCharacters([...characters, newChar]);
@@ -1740,31 +1741,11 @@ export default function App() {
                   Clicca il "bottone" che hai deciso (Scegli o Casuale), nomina il personaggio, trascina il personaggio e posizionalo dove vuoi, puoi sceglierne quanti ne vuoi. Quando hai finito fai uno screenshot. Poi clicca sul bottone "Termina Posizionamento" e segui le istruzioni successive. Quando avrai terminato, potrai salvare il tutto nel report, scaricarlo e inviarlo a Graziamaria.
                 </p>
               </div>
-              
-              <div className="flex flex-col items-center gap-2 w-full max-w-4xl justify-center flex-wrap mt-2">
-                <div className="flex items-center gap-2 rounded-full bg-[#fdfbf7] border border-[#e5e0d8] p-1 shadow-sm">
-                  <span className="px-3 text-[9px] font-black uppercase tracking-widest text-[#5a5a40]">Piano della figura</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStair('upper')}
-                    disabled={workflowStep === 1}
-                    className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-wider transition-all ${selectedStair === 'upper' ? 'bg-[#4c513c] text-white shadow-sm' : 'text-[#5a5a40] hover:bg-white'}`}
-                  >
-                    Superiore / posteriore
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStair('lower')}
-                    disabled={workflowStep === 1}
-                    className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-wider transition-all ${selectedStair === 'lower' ? 'bg-[#4c513c] text-white shadow-sm' : 'text-[#5a5a40] hover:bg-white'}`}
-                  >
-                    Inferiore / anteriore
-                  </button>
-                </div>
-                <p className="text-[9px] opacity-60 italic">Seleziona il piano prima di aggiungere ogni figura. L’ordine verrà calcolato da sinistra verso destra.</p>
-              </div>
+            </header>
 
-              <div className="flex items-center gap-3 w-full max-w-4xl justify-center flex-wrap mt-2">
+            {/* Action Toolbar */}
+            <div className="p-4 bg-white/40 backdrop-blur-sm border-b border-[#e5e0d8] flex justify-center z-40">
+              <div className="flex items-center gap-3 w-full max-w-4xl justify-center flex-wrap">
                 {/* Group: Creation */}
                 <div className="flex gap-2">
                   <button 
@@ -1853,39 +1834,50 @@ export default function App() {
                   </button>
                 </div>
               </div>
-            </header>
+            </div>
 
             {/* Main Game Area */}
-            <main className="flex-1 relative p-4 sm:p-8 flex flex-col items-center justify-center gap-2 sm:gap-4 overflow-hidden" ref={boardRef} style={{ perspective: '1200px' }}>
-              {/* Share Button */}
-              <button 
-                onClick={handleShare}
-                disabled={isSharing}
-                className="absolute top-6 left-6 z-40 flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm border border-[#e5e0d8] rounded-xl shadow-sm hover:bg-white transition-all text-[#25D366] active:scale-95 disabled:opacity-50"
-                title="Invia a Graziamaria"
-              >
-                <Share2 size={18} className={isSharing ? 'animate-spin' : ''} />
-                <span className="text-[10px] font-black uppercase tracking-wider">
-                  {isSharing ? 'Generazione...' : 'Invia a Graziamaria'}
-                </span>
-              </button>
+            <main className="flex-1 relative p-4 sm:p-8 flex flex-col items-center justify-center gap-2 sm:gap-4 overflow-hidden w-full" ref={boardRef}>
+                {/* Share Button */}
+                <button 
+                  onClick={handleShare}
+                  disabled={isSharing}
+                  className="absolute top-6 left-6 z-40 flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm border border-[#e5e0d8] rounded-xl shadow-sm hover:bg-white transition-all text-[#25D366] active:scale-95 disabled:opacity-50"
+                  title="Invia a Graziamaria"
+                >
+                  <Share2 size={18} className={isSharing ? 'animate-spin' : ''} />
+                  <span className="text-[10px] font-black uppercase tracking-wider">
+                    {isSharing ? 'Generazione...' : 'Invia a Graziamaria'}
+                  </span>
+                </button>
 
-              {/* Stage / Board */}
-              <div 
-                className="relative w-[329px] h-[184px] sm:w-[658px] sm:h-[368px] transition-transform duration-700 mt-12 sm:mt-0"
-                style={{ 
-                  transform: 'rotateX(25deg)',
-                  transformStyle: 'preserve-3d'
-                }}
-              >
-                <img 
-                  src="/fiori/000gradini.png" 
-                  alt="Stage" 
-                  className="w-full h-full object-cover rounded-[2rem] sm:rounded-[3rem] shadow-2xl border-4 sm:border-8 border-white/10"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent rounded-[2rem] sm:rounded-[3rem] pointer-events-none" />
-              </div>
+                {/* HTML/CSS Graphic Stage / Platforms */}
+                <div 
+                  className="relative w-full max-w-4xl h-[420px] bg-[#f2ede4] rounded-[3rem] border-4 border-[#e5e0d8] shadow-2xl p-6 flex flex-col justify-between overflow-hidden"
+                  style={{
+                    boxShadow: '0 25px 50px -12px rgba(74, 63, 53, 0.25)'
+                  }}
+                >
+                  {/* Upper Platform (Gradino Superiore / Posteriore) */}
+                  <div 
+                    ref={upperPlatformRef}
+                    className="relative w-full h-[180px] bg-gradient-to-b from-[#e8e0d0] to-[#dfd5c2] rounded-[2rem] border-2 border-[#d2c4b0] shadow-inner p-4 flex items-center justify-center transition-all"
+                  >
+                    <div className="absolute top-4 left-6 px-4 py-1 bg-[#4a3f35] text-white rounded-full text-[9px] font-black uppercase tracking-[0.2em] shadow-sm">
+                      GRADINO SUPERIORE (Posteriore)
+                    </div>
+                  </div>
+
+                  {/* Lower Platform (Gradino Inferiore / Anteriore) */}
+                  <div 
+                    ref={lowerPlatformRef}
+                    className="relative w-full h-[180px] bg-gradient-to-b from-[#f5f0e8] to-[#eae2d5] rounded-[2rem] border-2 border-[#d2c4b0] shadow-inner p-4 flex items-center justify-center transition-all"
+                  >
+                    <div className="absolute top-4 left-6 px-4 py-1 bg-[#c2b280] text-white rounded-full text-[9px] font-black uppercase tracking-[0.2em] shadow-sm">
+                      GRADINO INFERIORE (Anteriore)
+                    </div>
+                  </div>
+                </div>
 
               {/* Floor Reflection Effect */}
               <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white/80 to-transparent pointer-events-none z-0" />
@@ -1899,8 +1891,21 @@ export default function App() {
                   initial={{ x: char.x, y: char.y, scale: 0 }}
                   animate={{ scale: 1 }}
                   onDragEnd={(_, info) => {
+                    const upperRect = upperPlatformRef.current?.getBoundingClientRect();
+                    const lowerRect = lowerPlatformRef.current?.getBoundingClientRect();
+
+                    let newStair = char.stair || 'upper';
+                    if (upperRect && info.point.x >= upperRect.left && info.point.x <= upperRect.right && info.point.y >= upperRect.top && info.point.y <= upperRect.bottom) {
+                      newStair = 'upper';
+                    } else if (lowerRect && info.point.x >= lowerRect.left && info.point.x <= lowerRect.right && info.point.y >= lowerRect.top && info.point.y <= lowerRect.bottom) {
+                      newStair = 'lower';
+                    } else {
+                      alert("Posiziona la figura su un gradino");
+                      return;
+                    }
+
                     setCharacters(prev => prev.map(c => 
-                      c.id === char.id ? { ...c, x: c.x + info.offset.x, y: c.y + info.offset.y } : c
+                      c.id === char.id ? { ...c, x: c.x + info.offset.x, y: c.y + info.offset.y, stair: newStair } : c
                     ));
                   }}
                   onClick={() => handleCharacterClick(char)}
