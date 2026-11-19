@@ -30,8 +30,6 @@ import {
   ClipboardList
 } from 'lucide-react';
 import { BACH_FLOWERS, type BachFlower } from './constants/bachFlowers';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
@@ -538,6 +536,7 @@ export default function App() {
 
   const captureConstellationBlob = async () => {
     if (!boardRef.current) return null;
+    const { default: html2canvas } = await import('html2canvas');
     const canvas = await html2canvas(boardRef.current, {
       backgroundColor: '#f8f5f0',
       scale: 2,
@@ -797,7 +796,8 @@ export default function App() {
     setAnalyzingCharacter(null);
   };
 
-  const generatePDF = () => {
+  const generatePDF = async () => {
+    const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     const title = "Report Costellazione Sistemica";
     const date = new Date().toLocaleDateString('it-IT');
@@ -852,9 +852,10 @@ export default function App() {
     );
   };
 
-  const generateFlowerPDF = () => {
+  const generateFlowerPDF = async () => {
     if (selectedFlowersIds.length === 0) return;
-    
+
+    const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     const title = "Report Fiori di Bach Selezionati";
     const date = new Date().toLocaleDateString('it-IT');
@@ -897,9 +898,10 @@ export default function App() {
     saveFlowerReading(selectedFlowersIds);
   };
 
-  const generateRunePDF = () => {
+  const generateRunePDF = async () => {
     if (selectedRunesIds.length === 0) return;
-    
+
+    const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     const title = "Report Consultazione Rune";
     const date = new Date().toLocaleDateString('it-IT');
@@ -967,6 +969,7 @@ export default function App() {
       // Small delay to ensure UI is ready
       await new Promise(resolve => setTimeout(resolve, 100));
 
+      const { default: html2canvas } = await import('html2canvas');
       const canvas = await html2canvas(boardRef.current, {
         backgroundColor: '#f8f5f0',
         scale: 2,
@@ -1612,10 +1615,10 @@ export default function App() {
                 className="bg-white p-8 rounded-[2.5rem] shadow-lg border border-[#e5e0d8] flex flex-col items-center text-center gap-4 hover:shadow-xl transition-all group relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                  <img src="/fiori/00_Personaggi.png" alt="" className="w-24 h-24 object-contain" />
+                  <img src="/fiori/00_Personaggi.webp" alt="" className="w-24 h-24 object-contain" />
                 </div>
                 <div className="w-16 h-16 bg-[#f8f5f0] rounded-2xl flex items-center justify-center overflow-hidden group-hover:bg-[#c2b280] transition-colors z-10 p-2">
-                  <img src="/fiori/00_Personaggi.png" alt="Costellazioni" className="w-full h-full object-contain" />
+                  <img src="/fiori/00_Personaggi.webp" alt="Costellazioni" className="w-full h-full object-contain" />
                 </div>
                 <div className="z-10">
                   <h3 className="font-serif italic text-2xl mb-2">Costellazioni</h3>
@@ -1630,10 +1633,10 @@ export default function App() {
                 className="bg-white p-8 rounded-[2.5rem] shadow-lg border border-[#e5e0d8] flex flex-col items-center text-center gap-4 hover:shadow-xl transition-all group relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                  <img src="/fiori/0_Rescue_Remedy.png" alt="" className="w-24 h-24 object-contain" />
+                  <img src="/fiori/0_Rescue_Remedy.webp" alt="" className="w-24 h-24 object-contain" />
                 </div>
                 <div className="w-16 h-16 bg-[#f8f5f0] rounded-2xl flex items-center justify-center overflow-hidden group-hover:bg-[#c2b280] transition-colors z-10 p-2">
-                  <img src="/fiori/0_Rescue_Remedy.png" alt="Fiori di Bach" className="w-full h-full object-contain" />
+                  <img src="/fiori/0_Rescue_Remedy.webp" alt="Fiori di Bach" className="w-full h-full object-contain" />
                 </div>
                 <div className="z-10">
                   <h3 className="font-serif italic text-2xl mb-2">Fiori di Bach</h3>
@@ -1667,7 +1670,7 @@ export default function App() {
               <div className="flex flex-col md:flex-row gap-12 items-center md:items-start">
                 <div className="w-full md:w-2/5 shrink-0">
                   <img 
-                    src="/fiori/00_grazia.png" 
+                    src="/fiori/00_grazia.webp" 
                     alt="Graziamaria" 
                     className="w-full object-contain rounded-2xl"
                     referrerPolicy="no-referrer"
@@ -1792,7 +1795,7 @@ export default function App() {
                   <h1 className="font-serif italic tracking-tight" style={{ color: '#090909', fontSize: '28px', lineHeight: '26px', fontWeight: 'bold' }}>Costellazioni</h1>
                   <p className="uppercase tracking-[0.2em]" style={{ color: '#5a5a40', fontSize: '10px', fontWeight: 'bold' }}>Simulazione Interattiva per Diagnosi Olistica</p>
                   <img 
-                    src="/fiori/00_Personaggi.png" 
+                    src="/fiori/00_Personaggi.webp" 
                     alt="Personaggi" 
                     className="mt-4 object-contain mx-auto"
                     style={{ width: '186.45px', height: '102px' }}
@@ -1971,7 +1974,7 @@ export default function App() {
                 }}
               >
                 <img 
-                  src="/fiori/000gradini.png" 
+                  src="/fiori/000gradini.webp" 
                   alt="Stage" 
                   className="w-full h-full object-cover rounded-[2rem] sm:rounded-[3rem] shadow-2xl border-4 sm:border-8 border-white/10"
                   referrerPolicy="no-referrer"

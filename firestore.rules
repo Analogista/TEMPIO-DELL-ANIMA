@@ -71,6 +71,24 @@ service cloud.firestore {
         && data.photoUrls is list && data.photoUrls.size() <= 2
         && data.status == 'pending' && hasTimestamp(data, 'createdAt');
     }
+    function validGlobalReading(data) {
+      return data.keys().hasAll(['type', 'userId', 'userEmail', 'timestamp'])
+        && data.keys().hasOnly(['question','runeIds','runeNames','flowerIds','flowerNames','characters','labels','screenshotUrl','userData','userName','userEmail','timestamp','type','userId'])
+        && data.type in ['rune', 'flower', 'constellation']
+        && data.userId == request.auth.uid
+        && data.userEmail == request.auth.token.email
+        && (data.get('userName', null) == null || (data.userName is string && data.userName.size() <= 100))
+        && data.get('question', '') is string && data.get('question', '').size() <= 500
+        && data.get('runeIds', []) is list && data.get('runeIds', []).size() <= 24
+        && data.get('runeNames', []) is list && data.get('runeNames', []).size() <= 24
+        && data.get('flowerIds', []) is list && data.get('flowerIds', []).size() <= 38
+        && data.get('flowerNames', []) is list && data.get('flowerNames', []).size() <= 38
+        && data.get('characters', []) is list && data.get('characters', []).size() <= 50
+        && data.get('labels', []) is list && data.get('labels', []).size() <= 50
+        && data.get('screenshotUrl', '') is string && data.get('screenshotUrl', '').size() <= 2000
+        && data.get('userData', {}) is map
+        && data.get('timestamp', null) == request.time;
+    }
 
     match /{document=**} { allow read, write: if false; }
 
@@ -104,8 +122,7 @@ service cloud.firestore {
     }
     match /allReadings/{readingId} {
       allow read: if isAdmin();
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
-        && request.resource.data.keys().hasOnly(['question', 'runeIds', 'runeNames', 'flowerIds', 'flowerNames', 'characters', 'labels', 'screenshotUrl', 'userData', 'userName', 'userEmail', 'timestamp', 'type', 'userId']);
+      allow create: if isSignedIn() && isValidId(readingId) && validGlobalReading(request.resource.data);
       allow update, delete: if isAdmin();
     }
     match /admins/{adminId} { allow read: if isAdmin(); }
