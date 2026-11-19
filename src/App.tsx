@@ -62,9 +62,11 @@ type CharacterType = {
   label: string;
   x: number;
   y: number;
-  stair?: 'upper' | 'lower';
+  stair: 'upper' | 'lower';
+  normalizedX: number;
   feeling?: 'piacevole' | 'spiacevole';
   memory?: string;
+  snapSeq?: number;
 };
 
 type RuneType = {
@@ -141,88 +143,153 @@ const PREDEFINED_LABELS = [
   "Partner", "Figlio", "Figlia", "Amico", "Lavoro", "Paura", "Sogno"
 ];
 
-type PositionCharacter = Pick<CharacterType, 'id' | 'label' | 'x' | 'y' | 'stair' | 'memory'>;
+type PositionCharacter = Pick<CharacterType, 'id' | 'label' | 'x' | 'y'> & {
+  stair?: 'upper' | 'lower';
+  normalizedX?: number;
+  feeling?: 'piacevole' | 'spiacevole';
+  memory?: string;
+};
 
-const BOARD_REFERENCE_WIDTH = 658;
+const STAGE_IMAGE_URL = '/assets/aistudio/gradini-frontali_8b28bf22.webp';
+const STAGE_REF_WIDTH = 1600;
+const STAGE_REF_HEIGHT = 900;
 
-function detectStairFromElements(
-  figureEl: HTMLElement | null,
-  stageEl: HTMLElement | null,
-  fallbackY: number
-): 'upper' | 'lower' {
-  if (figureEl && stageEl) {
-    const figRect = figureEl.getBoundingClientRect();
-    const stageRect = stageEl.getBoundingClientRect();
-    if (stageRect.width > 0 && stageRect.height > 0 && figRect.height > 0) {
-      const centerX = (figRect.left + figRect.right) / 2;
-      const baseY = figRect.bottom;
-      const xRatio = Math.min(1, Math.max(0, (centerX - stageRect.left) / stageRect.width));
-      const yRatio = (baseY - stageRect.top) / stageRect.height;
-      // Front edge between upper step and lower step in 000gradini.webp
-      const boundaryYRatio = 0.44 + 0.14 * xRatio;
-      return yRatio <= boundaryYRatio ? 'upper' : 'lower';
-    }
-  }
-  return fallbackY < -80 ? 'upper' : 'lower';
+const STAIR_GEOMETRY = {
+  upper: { yRatio: 0.478, minXRatio: 0.2375, maxXRatio: 0.7625 },
+  lower: { yRatio: 0.739, minXRatio: 0.0625, maxXRatio: 0.9375 }
+} as const;
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
-function resolveCharacterStair(character: PositionCharacter) {
-  if (character.stair === 'upper' || character.stair === 'lower') {
-    return { value: character.stair, method: 'explicit' as const };
-  }
+function getStairXRatio(stair: 'upper' | 'lower', normalizedX: number): number {
+  const geom = STAIR_GEOMETRY[stair];
+  return geom.minXRatio + clamp01(normalizedX) * (geom.maxXRatio - geom.minXRatio);
+}
 
-  const memory = (character.memory || '').toLowerCase();
-  if (memory.includes('gradino superiore')) {
-    return { value: 'upper' as const, method: 'estimated' as const };
-  }
-  if (memory.includes('gradino inferiore')) {
-    return { value: 'lower' as const, method: 'estimated' as const };
-  }
-
-  // Ripiego legacy: stima verticale quando il campo stair non era ancora salvato.
+function snapStageRatioToStair(xRatio: number, yRatio: number): {
+  stair: 'upper' | 'lower';
+  normalizedX: number;
+  x: number;
+  y: number;
+} {
+  const distUpper = Math.abs(yRatio - STAIR_GEOMETRY.upper.yRatio);
+  const distLower = Math.abs(yRatio - STAIR_GEOMETRY.lower.yRatio);
+  const stair: 'upper' | 'lower' = distUpper <= distLower ? 'upper' : 'lower';
+  const geom = STAIR_GEOMETRY[stair];
+  const clampedXRatio = Math.min(geom.maxXRatio, Math.max(geom.minXRatio, xRatio));
+  const rawNormalizedX = (clampedXRatio - geom.minXRatio) / (geom.maxXRatio - geom.minXRatio);
+  const normalizedX = Math.round(clamp01(rawNormalizedX) * 1000) / 1000;
+  const snappedXRatio = getStairXRatio(stair, normalizedX);
   return {
-    value: character.y < -80 ? 'upper' as const : 'lower' as const,
-    method: 'estimated' as const
+    stair,
+    normalizedX,
+    x: Math.round(snappedXRatio * STAGE_REF_WIDTH),
+    y: Math.round(geom.yRatio * STAGE_REF_HEIGHT)
   };
 }
 
-function describeProximityBand(distancePx: number): 'vicino' | 'media' | 'lontano' {
-  const ratio = distancePx / BOARD_REFERENCE_WIDTH;
-  if (ratio <= 0.14) return 'vicino';
-  if (ratio <= 0.30) return 'media';
+function getCharacterStairV2(character: PositionCharacter): 'upper' | 'lower' {
+  if (character.stair === 'upper' || character.stair === 'lower') {
+    return character.stair;
+  }
+  const distUpper = Math.abs(Number(character.y) - STAIR_GEOMETRY.upper.yRatio * STAGE_REF_HEIGHT);
+  const distLower = Math.abs(Number(character.y) - STAIR_GEOMETRY.lower.yRatio * STAGE_REF_HEIGHT);
+  return distUpper <= distLower ? 'upper' : 'lower';
+}
+
+function getCharacterNormalizedX(character: PositionCharacter): number {
+  if (typeof character.normalizedX === 'number' && Number.isFinite(character.normalizedX)) {
+    return clamp01(character.normalizedX);
+  }
+  const stair = getCharacterStairV2(character);
+  const geom = STAIR_GEOMETRY[stair];
+  const xRatio = Number(character.x) / STAGE_REF_WIDTH;
+  return clamp01((xRatio - geom.minXRatio) / (geom.maxXRatio - geom.minXRatio));
+}
+
+function describeProximityBandByStageRatio(distanceStageRatio: number): 'vicino' | 'media' | 'lontano' {
+  if (distanceStageRatio <= 0.14) return 'vicino';
+  if (distanceStageRatio <= 0.30) return 'media';
   return 'lontano';
 }
 
-function describeCharacterPosition(characters: PositionCharacter[], targetId: string) {
+function describeCharacterPosition(
+  characters: PositionCharacter[],
+  targetId: string,
+  layoutVersion?: number
+) {
+  if (layoutVersion !== 2) {
+    return {
+      stair: '',
+      summary: 'layout precedente: posizione non attendibile',
+      isLegacy: true as const
+    };
+  }
+
   const target = characters.find(character => character.id === targetId);
   if (!target) return null;
 
-  const targetStair = resolveCharacterStair(target);
-  const stairLabel = targetStair.value === 'upper' ? 'Gradino superiore' : 'Gradino inferiore';
+  const targetStair = getCharacterStairV2(target);
+  const targetNormX = getCharacterNormalizedX(target);
+  const targetStageX = getStairXRatio(targetStair, targetNormX);
+  const stairLabel = targetStair === 'upper' ? 'Gradino superiore' : 'Gradino inferiore';
+
+  const ioChar = characters.find(
+    character => (character.label || '').trim().toLowerCase() === 'io'
+  );
+  let ioRelation: string | null = null;
+  if (ioChar && ioChar.id !== target.id) {
+    const ioNormX = getCharacterNormalizedX(ioChar);
+    const diffNorm = targetNormX - ioNormX;
+    if (Math.abs(diffNorm) < 0.04) {
+      ioRelation = 'in linea con Io';
+    } else if (diffNorm < 0) {
+      // Prospettiva di Io (frontale allo schermo): sinistra sullo schermo = destra di Io
+      ioRelation = 'alla destra di Io';
+    } else {
+      // Destra sullo schermo = sinistra di Io
+      ioRelation = 'alla sinistra di Io';
+    }
+  }
+
+  // Ordine da sinistra dalla prospettiva del pupazzo "Io" (normalizedX decrescente rispetto allo schermo)
   const sameStair = characters
-    .filter(character => resolveCharacterStair(character).value === targetStair.value)
-    .sort((a, b) => a.x - b.x || a.y - b.y || a.id.localeCompare(b.id));
+    .filter(character => getCharacterStairV2(character) === targetStair)
+    .sort((a, b) => {
+      const diff = getCharacterNormalizedX(b) - getCharacterNormalizedX(a);
+      if (Math.abs(diff) > 1e-6) return diff;
+      return a.id.localeCompare(b.id);
+    });
+
   const zeroBasedIndex = sameStair.findIndex(character => character.id === targetId);
   if (zeroBasedIndex < 0) return null;
 
   if (sameStair.length === 1) {
+    const parts = [stairLabel, 'unica sul gradino'];
+    if (ioRelation) parts.push(ioRelation);
     return {
       stair: stairLabel,
-      summary: `${stairLabel} · unica sul gradino`,
-      method: targetStair.method
+      summary: parts.join(' · '),
+      isLegacy: false as const,
+      normalizedX: targetNormX
     };
   }
 
   const orderText = `${zeroBasedIndex + 1}º da sinistra su ${sameStair.length}`;
   const others = sameStair.filter(character => character.id !== targetId);
-  const overlapped = others.filter(
-    other => Math.abs(other.x - target.x) < 28 && Math.abs(other.y - target.y) < 45
-  );
+  const overlapped = others.filter(other => {
+    const otherStageX = getStairXRatio(targetStair, getCharacterNormalizedX(other));
+    return Math.abs(otherStageX - targetStageX) < 0.035;
+  });
 
   const leftNeighbor = zeroBasedIndex > 0 ? sameStair[zeroBasedIndex - 1] : null;
   const rightNeighbor = zeroBasedIndex < sameStair.length - 1 ? sameStair[zeroBasedIndex + 1] : null;
-  const minDistance = Math.min(...others.map(other => Math.abs(other.x - target.x)));
-  const proximity = describeProximityBand(minDistance);
+  const minDistanceStageRatio = Math.min(
+    ...others.map(other => Math.abs(getStairXRatio(targetStair, getCharacterNormalizedX(other)) - targetStageX))
+  );
+  const proximity = describeProximityBandByStageRatio(minDistanceStageRatio);
 
   const parts: string[] = [stairLabel, orderText];
 
@@ -239,53 +306,43 @@ function describeCharacterPosition(characters: PositionCharacter[], targetId: st
     parts.push(`vicinanza: ${proximity}`);
   }
 
+  if (ioRelation) {
+    parts.push(ioRelation);
+  }
+
   return {
     stair: stairLabel,
     summary: parts.join(' · '),
-    method: targetStair.method
+    isLegacy: false as const,
+    normalizedX: targetNormX
   };
 }
 
-function getFigureHeight(shape: CharacterType['shape']): number {
-  switch (shape) {
-    case 'conical-large':
-    case 'cylindrical-large':
-      return 107;
-    case 'conical-medium':
-    case 'cylindrical-medium':
-      return 88;
-    case 'cylindrical-small':
-      return 69;
-    case 'flat-large':
-      return 80;
-    case 'flat-medium':
-      return 64;
-    case 'block':
-      return 24;
-    default:
-      return 88;
-  }
-}
-
-function computeLabelOffsets(characters: CharacterType[]): Record<string, number> {
+function computeLabelOffsets(characters: CharacterType[], stageWidth: number): Record<string, number> {
+  const safeStageW = stageWidth > 0 ? stageWidth : 800;
+  const safeStageH = (safeStageW * 9) / 16;
   const LABEL_HEIGHT = 24;
-  const LABEL_STEP = 24;
-  const H_PADDING = 8;
+  const LABEL_STEP = 28;
+  const H_PADDING = 6;
   const V_PADDING = 2;
 
-  const sorted = [...characters].sort((a, b) => a.x - b.x || a.y - b.y || a.id.localeCompare(b.id));
+  const sorted = [...characters].sort((a, b) => {
+    if (a.stair !== b.stair) return a.stair === 'upper' ? -1 : 1;
+    return a.normalizedX - b.normalizedX || a.id.localeCompare(b.id);
+  });
+
   const placed: { left: number; right: number; top: number; bottom: number }[] = [];
   const offsets: Record<string, number> = {};
-  let collisionCounter = 0;
 
   for (const char of sorted) {
+    const xRatio = getStairXRatio(char.stair, char.normalizedX);
+    const yRatio = STAIR_GEOMETRY[char.stair].yRatio;
+    const centerX = xRatio * safeStageW;
+    const baseTop = yRatio * safeStageH + 6;
     const labelLen = (char.label || '').length;
     const width = Math.max(58, labelLen * 7.5 + 28 + (char.feeling ? 22 : 0));
-    const figureW = Math.max(width, 48);
-    const centerX = char.x + figureW / 2;
     const left = centerX - width / 2 - H_PADDING;
     const right = centerX + width / 2 + H_PADDING;
-    const baseTop = char.y + getFigureHeight(char.shape) + 8;
 
     const overlapsAt = (dy: number) => {
       const top = baseTop + dy - V_PADDING;
@@ -296,14 +353,8 @@ function computeLabelOffsets(characters: CharacterType[]): Record<string, number
     };
 
     let chosenOffset = 0;
-    if (overlapsAt(0)) {
-      collisionCounter += 1;
-      const preferUp = collisionCounter % 2 === 0;
-      const candidates = preferUp
-        ? [-LABEL_STEP, LABEL_STEP, -LABEL_STEP * 2, LABEL_STEP * 2, -LABEL_STEP * 3, LABEL_STEP * 3, -LABEL_STEP * 4, LABEL_STEP * 4]
-        : [LABEL_STEP, -LABEL_STEP, LABEL_STEP * 2, -LABEL_STEP * 2, LABEL_STEP * 3, -LABEL_STEP * 3, LABEL_STEP * 4, -LABEL_STEP * 4];
-      const available = candidates.find(candidate => !overlapsAt(candidate));
-      chosenOffset = available !== undefined ? available : LABEL_STEP * collisionCounter;
+    while (overlapsAt(chosenOffset)) {
+      chosenOffset += LABEL_STEP;
     }
 
     offsets[char.id] = chosenOffset;
@@ -331,11 +382,15 @@ function getConstellationPositionsSignature(read: any): string {
       shape: c.shape || '',
       color: c.color || '',
       label: c.label || '',
+      stair: c.stair || '',
+      normalizedX: typeof c.normalizedX === 'number' ? Math.round(c.normalizedX * 1000) : null,
       x: Math.round(Number(c.x) || 0),
       y: Math.round(Number(c.y) || 0)
     }))
     .sort((a: any, b: any) =>
-      `${a.label}|${a.shape}|${a.x}|${a.y}`.localeCompare(`${b.label}|${b.shape}|${b.x}|${b.y}`)
+      `${a.label}|${a.shape}|${a.stair}|${a.normalizedX ?? ''}|${a.x}|${a.y}`.localeCompare(
+        `${b.label}|${b.shape}|${b.stair}|${b.normalizedX ?? ''}|${b.x}|${b.y}`
+      )
     );
   return JSON.stringify(normalized);
 }
@@ -985,11 +1040,12 @@ export default function App() {
       label: c.label,
       x: Math.round(c.x),
       y: Math.round(c.y),
-      stair: c.stair || null,
+      stair: c.stair,
+      normalizedX: Math.round(c.normalizedX * 1000) / 1000,
       feeling: c.feeling || null,
       memory: c.memory || ''
     }));
-    return JSON.stringify({ uid, chars: normalized });
+    return JSON.stringify({ uid, layoutVersion: 2, chars: normalized });
   };
 
   const saveRuneReading = async (question: string, runeIds: number[]) => {
@@ -1061,14 +1117,7 @@ export default function App() {
           if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
           const main = clonedDoc.querySelector('main');
           if (main) {
-            main.style.perspective = 'none';
             main.style.overflow = 'visible';
-          }
-          const stage = clonedDoc.querySelector<HTMLElement>('[data-constellation-stage="true"]');
-          if (stage) {
-            stage.style.transform = 'none';
-            stage.style.transformStyle = 'flat';
-            stage.style.perspective = 'none';
           }
         }
       });
@@ -1095,11 +1144,21 @@ export default function App() {
 
   const resolveCharsWithStair = (chars: CharacterType[]): CharacterType[] =>
     chars.map(char => {
-      if (char.stair === 'upper' || char.stair === 'lower') return char;
-      const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${char.id}"]`) as HTMLElement | null;
+      const stair: 'upper' | 'lower' = char.stair === 'upper' || char.stair === 'lower'
+        ? char.stair
+        : getCharacterStairV2(char);
+      const normalizedX = typeof char.normalizedX === 'number' && Number.isFinite(char.normalizedX)
+        ? Math.round(clamp01(char.normalizedX) * 1000) / 1000
+        : Math.round(getCharacterNormalizedX(char) * 1000) / 1000;
+      const geom = STAIR_GEOMETRY[stair];
+      const snappedX = Math.round(getStairXRatio(stair, normalizedX) * STAGE_REF_WIDTH);
+      const snappedY = Math.round(geom.yRatio * STAGE_REF_HEIGHT);
       return {
         ...char,
-        stair: detectStairFromElements(figEl, stageRef.current, char.y)
+        stair,
+        normalizedX,
+        x: snappedX,
+        y: snappedY
       };
     });
 
@@ -1112,14 +1171,15 @@ export default function App() {
     }
 
     try {
-      const savedCharacters = resolvedChars.map(({ id, shape, color, label, x, y, stair, feeling, memory }) => ({
+      const savedCharacters = resolvedChars.map(({ id, shape, color, label, x, y, stair, normalizedX, feeling, memory }) => ({
         id,
         shape,
         color,
         label,
         x,
         y,
-        ...(stair ? { stair } : {}),
+        stair,
+        normalizedX,
         ...(feeling ? { feeling } : {}),
         ...(memory ? { memory } : {})
       }));
@@ -1127,6 +1187,12 @@ export default function App() {
       const dataToSave = {
         characters: savedCharacters,
         labels: characterLabels,
+        userData: {
+          nome: userData.nome || '',
+          eta: userData.eta || '',
+          sesso: userData.sesso || '',
+          layoutVersion: 2
+        },
         ...(screenshotUrl ? { screenshotUrl } : {}),
         userName: (userProfile?.nome || user.displayName || '').slice(0, 100),
         userEmail: user.email || '',
@@ -1268,6 +1334,48 @@ export default function App() {
   });
   const boardRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const [stageWidth, setStageWidth] = useState<number>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 640 ? 340 : 800
+  );
+
+  useEffect(() => {
+    let observer: ResizeObserver | null = null;
+    let rafId = 0;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const updateStageSize = () => {
+      if (stageRef.current?.clientWidth) {
+        setStageWidth(stageRef.current.clientWidth);
+      } else if (typeof window !== 'undefined') {
+        setStageWidth(Math.min(800, Math.max(280, window.innerWidth - 32)));
+      }
+    };
+
+    const attachObserver = () => {
+      updateStageSize();
+      if (stageRef.current && typeof ResizeObserver !== 'undefined' && !observer) {
+        observer = new ResizeObserver((entries) => {
+          const width = entries[0]?.contentRect?.width;
+          if (width && width > 0) {
+            setStageWidth(width);
+          }
+        });
+        observer.observe(stageRef.current);
+      }
+    };
+
+    attachObserver();
+    rafId = requestAnimationFrame(attachObserver);
+    timerId = setTimeout(attachObserver, 350);
+    window.addEventListener('resize', updateStageSize);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      if (timerId) clearTimeout(timerId);
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', updateStageSize);
+    };
+  }, [currentPage]);
 
   const handleDraw = () => {
     const randomShape = CHARACTER_SHAPES[Math.floor(Math.random() * CHARACTER_SHAPES.length)];
@@ -1291,30 +1399,23 @@ export default function App() {
     if (!drawingCharacter) return;
 
     const newId = Math.random().toString(36).substr(2, 9);
-    const initialStair = detectStairFromElements(null, stageRef.current, 0);
+    // Aggancia alla superficie del gradino più vicino al centro (y = 0.50 -> upper 0.478, x = 0.50)
+    const initialPlacement = snapStageRatioToStair(0.5, 0.5);
     const newChar: CharacterType = {
       id: newId,
       shape: drawingCharacter.shape as any,
       color: drawingCharacter.color,
       label: tempLabel || "Sconosciuto",
-      x: 0,
-      y: 0, // Appear at the center of the board, between the platforms
-      stair: initialStair,
+      x: initialPlacement.x,
+      y: initialPlacement.y,
+      stair: initialPlacement.stair,
+      normalizedX: initialPlacement.normalizedX,
+      snapSeq: 0,
     };
 
     setCharacters(prev => [...prev, newChar]);
     setDrawingCharacter(null);
     setShowLabelInput(false);
-
-    // Dopo l'animazione iniziale (scale 0 -> 1), misura il gradino reale su cui poggia la figura
-    setTimeout(() => {
-      const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${newId}"]`) as HTMLElement | null;
-      if (!figEl) return;
-      const detectedStair = detectStairFromElements(figEl, stageRef.current, 0);
-      setCharacters(prev => prev.map(c =>
-        c.id === newId && c.x === 0 && c.y === 0 ? { ...c, stair: detectedStair } : c
-      ));
-    }, 380);
   };
 
   const removeCharacter = (id: string) => {
@@ -1589,7 +1690,13 @@ export default function App() {
     }
 
     return (
-      <div className="relative flex flex-col items-center justify-center pointer-events-none" style={{ transform: `scale(${finalScale})` }}>
+      <div
+        className="relative flex flex-col items-center justify-center pointer-events-none"
+        style={{
+          transform: `scale(${finalScale})`,
+          transformOrigin: size === 'normal' ? 'bottom center' : 'center'
+        }}
+      >
         {/* Head */}
         {!isBlock && !isFlat && (
           <div 
@@ -1778,13 +1885,25 @@ export default function App() {
                           </button>
                         )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {read.userData?.layoutVersion !== 2 && (
+                            <div className="sm:col-span-2 lg:col-span-3 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold">
+                              layout precedente: posizione non attendibile
+                            </div>
+                          )}
                           {(read.characters || []).map((character: CharacterType, index: number) => {
-                            const position = describeCharacterPosition(read.characters as PositionCharacter[], character.id);
+                            const position = describeCharacterPosition(
+                              read.characters as PositionCharacter[],
+                              character.id,
+                              read.userData?.layoutVersion
+                            );
                             return (
                               <div key={`${read.id}-standalone-${index}`} className="p-3 rounded-xl bg-[#fdfbf7] border border-[#e5e0d8] text-[10px]">
                                 <p className="font-bold text-[#4a3f35]">{character.label || 'Senza nome'}</p>
-                                <p className="opacity-70">{position ? position.summary : 'Posizione non determinata'}</p>
-                                <p className="opacity-50">Coordinate tecniche: {Math.round(character.x)}, {Math.round(character.y)}{position?.method === 'estimated' ? ' · gradino stimato' : ''}</p>
+                                <p className="opacity-70">{position ? position.summary : 'layout precedente: posizione non attendibile'}</p>
+                                <p className="opacity-50">
+                                  Coordinate tecniche: {Math.round(character.x)}, {Math.round(character.y)}
+                                  {!position?.isLegacy && typeof position?.normalizedX === 'number' ? ` · xNorm ${position.normalizedX.toFixed(2)}` : ''}
+                                </p>
                                 {character.feeling && <p className="opacity-60">Emozione: {character.feeling}</p>}
                                 {character.memory && <p className="opacity-60 italic">Memoria: {character.memory}</p>}
                               </div>
@@ -1988,17 +2107,29 @@ export default function App() {
                                           )}
                                           <p><strong>Elementi posizionati:</strong> {read.characters.length}</p>
                                           <div className="space-y-1">
+                                            {read.userData?.layoutVersion !== 2 && (
+                                              <p className="px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold">
+                                                layout precedente: posizione non attendibile
+                                              </p>
+                                            )}
                                             {read.characters.map((character: CharacterType, index: number) => (
                                               <div key={`${read.id}-character-${index}`} className="rounded-xl bg-white/70 border border-[#e5e0d8] p-2">
                                                 <span className="font-bold text-[#4a3f35]">{character.label || 'Senza nome'}</span>
                                                 {character.feeling && <span> · Emozione: {character.feeling}</span>}
                                                 {character.memory && <span> · Memoria: {character.memory}</span>}
                                                 {(() => {
-                                                  const position = describeCharacterPosition(read.characters as PositionCharacter[], character.id);
+                                                  const position = describeCharacterPosition(
+                                                    read.characters as PositionCharacter[],
+                                                    character.id,
+                                                    read.userData?.layoutVersion
+                                                  );
                                                   return position ? (
                                                     <>
                                                       <span className="block text-[#5a5a40]">{position.summary}</span>
-                                                      <span className="block opacity-50">Coordinate tecniche: {Math.round(character.x)}, {Math.round(character.y)}{position.method === 'estimated' ? ' · gradino stimato' : ''}</span>
+                                                      <span className="block opacity-50">
+                                                        Coordinate tecniche: {Math.round(character.x)}, {Math.round(character.y)}
+                                                        {!position.isLegacy && typeof position.normalizedX === 'number' ? ` · xNorm ${position.normalizedX.toFixed(2)}` : ''}
+                                                      </span>
                                                     </>
                                                   ) : null;
                                                 })()}
@@ -2497,12 +2628,12 @@ export default function App() {
             </header>
 
             {/* Main Game Area */}
-            <main className="flex-1 relative p-4 sm:p-8 flex flex-col items-center justify-center gap-2 sm:gap-4 overflow-hidden" ref={boardRef} style={{ perspective: '1200px' }}>
+            <main className="flex-1 relative p-4 sm:p-8 pb-20 sm:pb-24 flex flex-col items-center justify-center gap-2 sm:gap-4" ref={boardRef}>
               {/* Share Button */}
               <button 
                 onClick={handleShare}
                 disabled={isSharing}
-                className="absolute top-6 left-6 z-40 flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm border border-[#e5e0d8] rounded-xl shadow-sm hover:bg-white transition-all text-[#25D366] active:scale-95 disabled:opacity-50"
+                className="absolute top-4 left-4 sm:top-6 sm:left-6 z-40 flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm border border-[#e5e0d8] rounded-xl shadow-sm hover:bg-white transition-all text-[#25D366] active:scale-95 disabled:opacity-50"
                 title="Invia a Graziamaria"
               >
                 <Share2 size={18} className={isSharing ? 'animate-spin' : ''} />
@@ -2511,88 +2642,119 @@ export default function App() {
                 </span>
               </button>
 
-              {/* Stage / Board */}
+              {/* Stage / Board (vista frontale 2D, proporzioni 16:9 senza trasformazioni 3D) */}
               <div 
                 ref={stageRef}
                 data-constellation-stage="true"
-                className="relative w-[329px] h-[184px] sm:w-[658px] sm:h-[368px] transition-transform duration-700 mt-12 sm:mt-0"
-                style={{ 
-                  transform: 'rotateX(25deg)',
-                  transformStyle: 'preserve-3d'
-                }}
+                className="relative w-full max-w-[800px] aspect-[16/9] mt-14 sm:mt-8 select-none"
               >
                 <img 
-                  src="/fiori/000gradini.webp" 
-                  alt="Stage" 
-                  className="w-full h-full object-cover rounded-[2rem] sm:rounded-[3rem] shadow-2xl border-4 sm:border-8 border-white/10"
-                  referrerPolicy="no-referrer"
+                  src={STAGE_IMAGE_URL} 
+                  alt="Gradini Costellazione" 
+                  className="w-full h-full object-contain pointer-events-none select-none"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent rounded-[2rem] sm:rounded-[3rem] pointer-events-none" />
-              </div>
 
-              {/* Floor Reflection Effect */}
-              <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white/80 to-transparent pointer-events-none z-0" />
-
-              {/* Draggable Characters */}
-              {(() => {
-                const labelOffsets = computeLabelOffsets(characters);
-                return characters.map((char) => (
-                  <motion.div
-                    key={char.id}
-                    drag={workflowStep === 0 || char.label.toLowerCase() === 'io'}
-                    dragMomentum={false}
-                    initial={{ x: char.x, y: char.y, scale: 0 }}
-                    animate={{ scale: 1 }}
-                    onDragEnd={(_, info) => {
-                      const nextX = char.x + info.offset.x;
-                      const nextY = char.y + info.offset.y;
-                      const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${char.id}"]`) as HTMLElement | null;
-                      const detectedStair = detectStairFromElements(figEl, stageRef.current, nextY);
-                      setCharacters(prev => prev.map(c => 
-                        c.id === char.id ? { ...c, x: nextX, y: nextY, stair: detectedStair } : c
-                      ));
-                    }}
-                    onClick={() => handleCharacterClick(char)}
-                    className={`absolute z-40 group ${
-                      (workflowStep === 0 || char.label.toLowerCase() === 'io') 
-                        ? 'cursor-grab active:cursor-grabbing' 
-                        : workflowStep === 1 
-                          ? 'cursor-pointer hover:ring-2 hover:ring-[#5a5a40] rounded-full transition-all' 
-                          : ''
-                    }`}
-                    style={{ left: '50%', top: '50%' }}
-                  >
-                    <div className="flex flex-col items-center">
-                      <div data-char-figure-id={char.id}>
-                        {renderShape(char.shape, char.color)}
-                      </div>
+                {/* Draggable Characters */}
+                {(() => {
+                  const labelOffsets = computeLabelOffsets(characters, stageWidth);
+                  return characters.map((char) => {
+                    const xPct = getStairXRatio(char.stair, char.normalizedX) * 100;
+                    const yPct = STAIR_GEOMETRY[char.stair].yRatio * 100;
+                    return (
                       <div
-                        className={`mt-2 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-full shadow-sm border border-[#e5e0d8] text-xs font-medium whitespace-nowrap ${char.feeling === 'piacevole' ? 'border-green-400' : char.feeling === 'spiacevole' ? 'border-red-400' : ''}`}
-                        style={{ position: 'relative', top: `${labelOffsets[char.id] || 0}px` }}
-                        translate="no"
+                        key={char.id}
+                        className="absolute z-40"
+                        style={{ left: `${xPct}%`, top: `${yPct}%`, width: 0, height: 0 }}
                       >
-                        {char.label}
-                        {char.feeling && (
-                          <span className="ml-1">
-                            {char.feeling === 'piacevole' ? '❤️' : '💔'}
-                          </span>
-                        )}
-                      </div>
-                      {workflowStep === 0 && (
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeCharacter(char.id);
+                        <motion.div
+                          key={`${char.id}-${char.snapSeq || 0}`}
+                          drag={workflowStep === 0 || char.label.toLowerCase() === 'io'}
+                          dragMomentum={false}
+                          initial={char.snapSeq ? false : { scale: 0 }}
+                          animate={{ scale: 1 }}
+                          onDragEnd={() => {
+                            const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${char.id}"]`) as HTMLElement | null;
+                            const stageEl = stageRef.current;
+                            if (!figEl || !stageEl) return;
+                            const figRect = figEl.getBoundingClientRect();
+                            const stageRect = stageEl.getBoundingClientRect();
+                            if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+                            const centerX = (figRect.left + figRect.right) / 2;
+                            const baseBottomY = figRect.bottom;
+                            const xRatio = (centerX - stageRect.left) / stageRect.width;
+                            const yRatio = (baseBottomY - stageRect.top) / stageRect.height;
+
+                            const nextPlacement = snapStageRatioToStair(xRatio, yRatio);
+                            setCharacters(prev => prev.map(c =>
+                              c.id === char.id
+                                ? {
+                                    ...c,
+                                    stair: nextPlacement.stair,
+                                    normalizedX: nextPlacement.normalizedX,
+                                    x: nextPlacement.x,
+                                    y: nextPlacement.y,
+                                    snapSeq: (c.snapSeq || 0) + 1
+                                  }
+                                : c
+                            ));
                           }}
-                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                          onClick={() => handleCharacterClick(char)}
+                          className={`relative group ${
+                            (workflowStep === 0 || char.label.toLowerCase() === 'io') 
+                              ? 'cursor-grab active:cursor-grabbing' 
+                              : workflowStep === 1 
+                                ? 'cursor-pointer' 
+                                : ''
+                          }`}
+                          style={{ width: 0, height: 0 }}
                         >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-                  </motion.div>
-                ));
-              })()}
+                          {/* Figura ancorata con la base sulla superficie del gradino (0, 0) */}
+                          <div
+                            data-char-figure-id={char.id}
+                            className={`absolute bottom-0 left-0 flex justify-center ${
+                              workflowStep === 1 && char.label.toLowerCase() !== 'io'
+                                ? 'hover:ring-2 hover:ring-[#5a5a40] rounded-2xl transition-all'
+                                : ''
+                            }`}
+                            style={{ transform: 'translateX(-50%)' }}
+                          >
+                            {renderShape(char.shape, char.color)}
+                            {workflowStep === 0 && (
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeCharacter(char.id);
+                                }}
+                                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md pointer-events-auto"
+                              >
+                                <X size={12} />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Etichetta sotto la base della figura, sfalsata in verticale se sovrapposta */}
+                          <div
+                            className={`absolute left-0 px-3 py-1 bg-white/95 rounded-full shadow-sm border border-[#e5e0d8] text-xs font-medium whitespace-nowrap ${char.feeling === 'piacevole' ? 'border-green-400' : char.feeling === 'spiacevole' ? 'border-red-400' : ''}`}
+                            style={{
+                              top: `${6 + (labelOffsets[char.id] || 0)}px`,
+                              transform: 'translateX(-50%)'
+                            }}
+                            translate="no"
+                          >
+                            {char.label}
+                            {char.feeling && (
+                              <span className="ml-1">
+                                {char.feeling === 'piacevole' ? '❤️' : '💔'}
+                              </span>
+                            )}
+                          </div>
+                        </motion.div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
             </main>
           </motion.div>
         ) : currentPage === 'rune' ? (
