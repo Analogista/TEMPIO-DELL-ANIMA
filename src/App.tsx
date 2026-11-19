@@ -383,6 +383,39 @@ function getDeduplicatedReadings(readings: any[]): any[] {
   return kept;
 }
 
+function getReadingDeletionGroup(targetReading: any, allReadings: any[]): any[] {
+  if (!targetReading) return [];
+  const ownerKey = targetReading.userId || targetReading.userEmail || 'unknown';
+  const type = targetReading.type;
+
+  const matched = allReadings.filter(item => {
+    if (!item) return false;
+    if (item.id === targetReading.id) return true;
+    if ((item.userId || item.userEmail || 'unknown') !== ownerKey || item.type !== type) {
+      return false;
+    }
+
+    if (type === 'constellation') {
+      return getConstellationPositionsSignature(item) === getConstellationPositionsSignature(targetReading);
+    }
+
+    if (type === 'rune' || type === 'flower') {
+      const targetIds: number[] = Array.isArray(type === 'rune' ? targetReading.runeIds : targetReading.flowerIds)
+        ? (type === 'rune' ? targetReading.runeIds : targetReading.flowerIds)
+        : [];
+      const itemIds: number[] = Array.isArray(type === 'rune' ? item.runeIds : item.flowerIds)
+        ? (type === 'rune' ? item.runeIds : item.flowerIds)
+        : [];
+      if (itemIds.length === 0) return true;
+      return itemIds.every(id => targetIds.includes(id));
+    }
+
+    return false;
+  });
+
+  return matched.length > 0 ? matched : [targetReading];
+}
+
 function replaceBalancedCssFunction(css: string, fnName: string, replacer: (fullMatch: string) => string): string {
   const needle = `${fnName}(`;
   const lower = css.toLowerCase();
@@ -673,19 +706,43 @@ export default function App() {
   };
 
   const deleteReading = async (reading: any) => {
-    if (!confirm('Vuoi eliminare questa lettura dall’area admin? L’operazione non può essere annullata.')) return;
+    const groupToDelete = getReadingDeletionGroup(reading, adminData.readings);
+    const deleteCount = groupToDelete.length;
+    const confirmMessage = deleteCount > 1
+      ? `Verranno eliminate ${deleteCount} letture dall’area admin (inclusi i doppioni e i salvataggi parziali associati). L’operazione non può essere annullata.`
+      : 'Verrà eliminata 1 lettura dall’area admin. L’operazione non può essere annullata.';
+
+    if (!confirm(confirmMessage)) return;
     try {
-      if (reading.screenshotUrl) {
+      const screenshotUrls = Array.from(
+        new Set(
+          groupToDelete
+            .map(item => item.screenshotUrl)
+            .filter((url): url is string => typeof url === 'string' && url.length > 0)
+        )
+      );
+
+      for (const screenshotUrl of screenshotUrls) {
         try {
-          await deleteObject(ref(storage, reading.screenshotUrl));
+          await deleteObject(ref(storage, screenshotUrl));
         } catch (storageError) {
           console.warn('Screenshot già assente o non eliminabile:', storageError);
         }
       }
-      await deleteDoc(doc(db, 'allReadings', reading.id));
+
+      for (let i = 0; i < groupToDelete.length; i += 450) {
+        const chunk = groupToDelete.slice(i, i + 450);
+        const batch = writeBatch(db);
+        chunk.forEach(item => {
+          batch.delete(doc(db, 'allReadings', item.id));
+        });
+        await batch.commit();
+      }
+
+      const deletedIds = new Set(groupToDelete.map(item => item.id));
       setAdminData(prev => ({
         ...prev,
-        readings: prev.readings.filter(item => item.id !== reading.id)
+        readings: prev.readings.filter(item => !deletedIds.has(item.id))
       }));
     } catch (error) {
       console.error('Errore eliminazione lettura:', error);
