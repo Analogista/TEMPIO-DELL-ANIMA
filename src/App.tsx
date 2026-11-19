@@ -190,6 +190,94 @@ function snapStageRatioToStair(xRatio: number, yRatio: number): {
   };
 }
 
+type ShapeDimensions = {
+  bodyWidth: number;
+  bodyHeight: number;
+  headSize: number;
+  isConical: boolean;
+  isFlat: boolean;
+  isBlock: boolean;
+  totalHeight: number;
+};
+
+function getShapeBaseDimensions(shape: string): ShapeDimensions {
+  let bodyWidth = 40;
+  let bodyHeight = 64;
+  let headSize = 32;
+  const isConical = shape.includes('conical');
+  const isFlat = shape.includes('flat');
+  const isBlock = shape === 'block';
+
+  if (shape.includes('large')) {
+    bodyWidth = 48;
+    bodyHeight = 80;
+    headSize = 36;
+  } else if (shape.includes('medium')) {
+    bodyWidth = 40;
+    bodyHeight = 64;
+    headSize = 32;
+  } else if (shape.includes('small')) {
+    bodyWidth = 32;
+    bodyHeight = 48;
+    headSize = 28;
+  } else if (isBlock) {
+    bodyWidth = 32;
+    bodyHeight = 24;
+    headSize = 0;
+  }
+
+  const hasHead = !isBlock && !isFlat;
+  const totalHeight = hasHead ? bodyHeight + headSize - headSize / 4 : bodyHeight;
+  return { bodyWidth, bodyHeight, headSize, isConical, isFlat, isBlock, totalHeight };
+}
+
+function getFigureDensityScale(count: number): number {
+  if (count > 20) return 0.65;
+  if (count > 12) return 0.8;
+  return 1;
+}
+
+function nudgeNormalizedXOnStair(
+  stair: 'upper' | 'lower',
+  candidateNormX: number,
+  otherNormalizedXs: number[],
+  densityScale: number
+): number {
+  if (otherNormalizedXs.length === 0) return candidateNormX;
+  const stairSpan = STAIR_GEOMETRY[stair].maxXRatio - STAIR_GEOMETRY[stair].minXRatio;
+  const overlapThresholdNorm = (0.020 * densityScale) / stairSpan;
+  const stepNorm = (0.034 * densityScale) / stairSpan;
+
+  const isTooClose = (nx: number) =>
+    otherNormalizedXs.some(other => Math.abs(other - nx) < overlapThresholdNorm);
+
+  if (!isTooClose(candidateNormX)) {
+    return candidateNormX;
+  }
+
+  let nearest = otherNormalizedXs[0];
+  let nearestDist = Infinity;
+  for (const other of otherNormalizedXs) {
+    const d = Math.abs(other - candidateNormX);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = other;
+    }
+  }
+  const primaryDir = candidateNormX >= nearest ? 1 : -1;
+
+  for (let k = 1; k <= 14; k += 1) {
+    for (const dir of [primaryDir, -primaryDir]) {
+      const candidate = clamp01(candidateNormX + dir * k * stepNorm);
+      if (!isTooClose(candidate)) {
+        return Math.round(candidate * 1000) / 1000;
+      }
+    }
+  }
+
+  return candidateNormX;
+}
+
 function getCharacterStairV2(character: PositionCharacter): 'upper' | 'lower' {
   if (character.stair === 'upper' || character.stair === 'lower') {
     return character.stair;
@@ -318,55 +406,225 @@ function describeCharacterPosition(
   };
 }
 
-function computeLabelOffsets(characters: CharacterType[], stageWidth: number): Record<string, number> {
-  const safeStageW = stageWidth > 0 ? stageWidth : 800;
-  const safeStageH = (safeStageW * 9) / 16;
-  const LABEL_HEIGHT = 24;
-  const LABEL_STEP = 28;
-  const H_PADDING = 6;
-  const V_PADDING = 2;
+type PillPlacement = {
+  char: CharacterType;
+  stair: 'upper' | 'lower';
+  lane: number;
+  centerX: number;
+  width: number;
+  height: number;
+  pillTopY: number;
+  pillBottomY: number;
+  wireStartY: number;
+  figX: number;
+  figAnchorY: number;
+};
 
-  const sorted = [...characters].sort((a, b) => {
-    if (a.stair !== b.stair) return a.stair === 'upper' ? -1 : 1;
-    return a.normalizedX - b.normalizedX || a.id.localeCompare(b.id);
-  });
+type PillLayoutResult = {
+  stageW: number;
+  stageH: number;
+  topBandH: number;
+  bottomBandH: number;
+  totalH: number;
+  pills: PillPlacement[];
+};
 
-  const placed: { left: number; right: number; top: number; bottom: number }[] = [];
-  const offsets: Record<string, number> = {};
+function segmentsIntersect2D(
+  ax: number, ay: number, bx: number, by: number,
+  cx: number, cy: number, dx: number, dy: number
+): boolean {
+  const ccw = (p1x: number, p1y: number, p2x: number, p2y: number, p3x: number, p3y: number) =>
+    (p3y - p1y) * (p2x - p1x) - (p2y - p1y) * (p3x - p1x);
+  const d1 = ccw(cx, cy, dx, dy, ax, ay);
+  const d2 = ccw(cx, cy, dx, dy, bx, by);
+  const d3 = ccw(ax, ay, bx, by, cx, cy);
+  const d4 = ccw(ax, ay, bx, by, dx, dy);
+  return (
+    ((d1 > 1e-3 && d2 < -1e-3) || (d1 < -1e-3 && d2 > 1e-3)) &&
+    ((d3 > 1e-3 && d4 < -1e-3) || (d3 < -1e-3 && d4 > 1e-3))
+  );
+}
 
-  for (const char of sorted) {
-    const xRatio = getStairXRatio(char.stair, char.normalizedX);
-    const yRatio = STAIR_GEOMETRY[char.stair].yRatio;
-    const centerX = xRatio * safeStageW;
-    const baseTop = yRatio * safeStageH + 6;
-    const labelLen = (char.label || '').length;
-    const width = Math.max(58, labelLen * 7.5 + 28 + (char.feeling ? 22 : 0));
-    const left = centerX - width / 2 - H_PADDING;
-    const right = centerX + width / 2 + H_PADDING;
+function computePillLayout(characters: CharacterType[], stageWidth: number): PillLayoutResult {
+  const safeW = stageWidth > 0 ? stageWidth : 800;
+  const stageH = (safeW * 9) / 16;
+  const isMobileStage = safeW < 640;
+  const densityScale = getFigureDensityScale(characters.length);
+  const effectiveScale = (isMobileStage ? 0.75 : 1) * densityScale;
 
-    const overlapsAt = (dy: number) => {
-      const top = baseTop + dy - V_PADDING;
-      const bottom = baseTop + dy + LABEL_HEIGHT + V_PADDING;
-      return placed.some(
-        box => left < box.right && right > box.left && top < box.bottom && bottom > box.top
-      );
+  const PILL_H = isMobileStage ? 24 : 26;
+  const LANE_GAP = 8;
+  const LANE_STEP = PILL_H + LANE_GAP;
+  const MIN_H_GAP = 8;
+  const TOP_STAGE_GAP = 16;
+  const BOTTOM_STAGE_GAP = 10;
+  const OUTER_PAD = 6;
+
+  type RelPlacedPill = {
+    char: CharacterType;
+    stair: 'upper' | 'lower';
+    lane: number;
+    centerX: number;
+    width: number;
+    relTopY: number;
+    relBottomY: number;
+    relWireStartY: number;
+    figX: number;
+    figAnchorRelY: number;
+  };
+
+  const layoutStairPills = (stair: 'upper' | 'lower'): { placed: RelPlacedPill[]; maxLane: number } => {
+    const items = characters
+      .filter(c => c.stair === stair)
+      .map(char => {
+        const figX = getStairXRatio(stair, char.normalizedX) * safeW;
+        const labelText = (char.label || 'Senza nome').trim() || 'Senza nome';
+        const maxPillW = Math.min(isMobileStage ? 160 : 210, safeW - 12);
+        const width = Math.min(
+          maxPillW,
+          Math.max(50, Math.round(labelText.length * (isMobileStage ? 7.4 : 8.0) + 28 + (char.feeling ? 22 : 0)))
+        );
+        const dims = getShapeBaseDimensions(char.shape);
+        const figAnchorRelY =
+          stair === 'upper'
+            ? STAIR_GEOMETRY.upper.yRatio * stageH - dims.totalHeight * effectiveScale
+            : STAIR_GEOMETRY.lower.yRatio * stageH;
+        return { char, figX, width, figAnchorRelY };
+      })
+      .sort((a, b) => a.figX - b.figX || a.char.id.localeCompare(b.char.id));
+
+    if (items.length === 0) return { placed: [], maxLane: -1 };
+
+    const laneBoxes: Array<Array<{ left: number; right: number }>> = [];
+    const placed: RelPlacedPill[] = [];
+
+    const getRelBoxY = (lane: number) => {
+      if (stair === 'upper') {
+        const relBottomY = -(TOP_STAGE_GAP + lane * LANE_STEP);
+        return { relTopY: relBottomY - PILL_H, relBottomY, relWireStartY: relBottomY };
+      }
+      const relTopY = stageH + BOTTOM_STAGE_GAP + lane * LANE_STEP;
+      return { relTopY, relBottomY: relTopY + PILL_H, relWireStartY: relTopY };
     };
 
-    let chosenOffset = 0;
-    while (overlapsAt(chosenOffset)) {
-      chosenOffset += LABEL_STEP;
+    const fitsInLane = (lane: number, left: number, right: number) => {
+      const boxes = laneBoxes[lane] || [];
+      return !boxes.some(box => left < box.right + MIN_H_GAP && right > box.left - MIN_H_GAP);
+    };
+
+    const crossesAnyWire = (cx: number, wireStartY: number, figX: number, figAnchorRelY: number) =>
+      placed.some(p =>
+        segmentsIntersect2D(cx, wireStartY, figX, figAnchorRelY, p.centerX, p.relWireStartY, p.figX, p.figAnchorRelY)
+      );
+
+    for (const item of items) {
+      const halfW = item.width / 2;
+      const minCenterX = halfW + 4;
+      const maxCenterX = Math.max(minCenterX, safeW - halfW - 4);
+      const idealX = Math.min(maxCenterX, Math.max(minCenterX, item.figX));
+
+      let chosenLane = -1;
+      let chosenX = idealX;
+
+      const maxSearchLane = laneBoxes.length + 1;
+      for (let lane = 0; lane <= maxSearchLane; lane += 1) {
+        const { relWireStartY } = getRelBoxY(lane);
+        const laneItems = laneBoxes[lane] || [];
+        const rightmost = laneItems.length > 0 ? laneItems[laneItems.length - 1].right : -Infinity;
+        const earliestX = rightmost === -Infinity ? minCenterX : Math.max(minCenterX, rightmost + MIN_H_GAP + halfW);
+
+        const candidateXs: number[] = [];
+        if (idealX >= earliestX) {
+          candidateXs.push(idealX);
+        } else if (earliestX <= maxCenterX && earliestX - idealX <= (isMobileStage ? 24 : 38)) {
+          candidateXs.push(earliestX);
+        }
+        if (candidateXs.length === 0 && fitsInLane(lane, idealX - halfW, idealX + halfW)) {
+          candidateXs.push(idealX);
+        }
+        // Se idealX era bloccato sul bordo sinistro/destro, prova piccoli spostamenti laterali per evitare incroci dei fili
+        if (idealX !== item.figX) {
+          const shiftDir = idealX > item.figX ? 1 : -1;
+          for (const delta of [16, 32, 48]) {
+            const shifted = Math.min(maxCenterX, Math.max(minCenterX, idealX + shiftDir * delta));
+            if (fitsInLane(lane, shifted - halfW, shifted + halfW)) {
+              candidateXs.push(shifted);
+            }
+          }
+        }
+
+        let foundValid = false;
+        for (const cx of candidateXs) {
+          if (fitsInLane(lane, cx - halfW, cx + halfW) && !crossesAnyWire(cx, relWireStartY, item.figX, item.figAnchorRelY)) {
+            chosenLane = lane;
+            chosenX = cx;
+            foundValid = true;
+            break;
+          }
+        }
+        if (foundValid) break;
+      }
+
+      if (chosenLane < 0) {
+        chosenLane = laneBoxes.length;
+        while (!fitsInLane(chosenLane, idealX - halfW, idealX + halfW)) {
+          chosenLane += 1;
+        }
+        chosenX = idealX;
+      }
+
+      while (laneBoxes.length <= chosenLane) laneBoxes.push([]);
+      laneBoxes[chosenLane].push({ left: chosenX - halfW, right: chosenX + halfW });
+
+      const { relTopY, relBottomY, relWireStartY } = getRelBoxY(chosenLane);
+      placed.push({
+        char: item.char,
+        stair,
+        lane: chosenLane,
+        centerX: chosenX,
+        width: item.width,
+        relTopY,
+        relBottomY,
+        relWireStartY,
+        figX: item.figX,
+        figAnchorRelY: item.figAnchorRelY
+      });
     }
 
-    offsets[char.id] = chosenOffset;
-    placed.push({
-      left,
-      right,
-      top: baseTop + chosenOffset,
-      bottom: baseTop + chosenOffset + LABEL_HEIGHT
-    });
-  }
+    const maxLane = placed.reduce((acc, p) => Math.max(acc, p.lane), -1);
+    return { placed, maxLane };
+  };
 
-  return offsets;
+  const upperResult = layoutStairPills('upper');
+  const lowerResult = layoutStairPills('lower');
+
+  const topBandH =
+    upperResult.maxLane < 0 ? 0 : TOP_STAGE_GAP + upperResult.maxLane * LANE_STEP + PILL_H + OUTER_PAD;
+  const bottomBandH =
+    lowerResult.maxLane < 0 ? 0 : BOTTOM_STAGE_GAP + lowerResult.maxLane * LANE_STEP + PILL_H + OUTER_PAD;
+
+  const pills: PillPlacement[] = [...upperResult.placed, ...lowerResult.placed].map(p => ({
+    char: p.char,
+    stair: p.stair,
+    lane: p.lane,
+    centerX: p.centerX,
+    width: p.width,
+    height: PILL_H,
+    pillTopY: topBandH + p.relTopY,
+    pillBottomY: topBandH + p.relBottomY,
+    wireStartY: topBandH + p.relWireStartY,
+    figX: p.figX,
+    figAnchorY: topBandH + p.figAnchorRelY
+  }));
+
+  return {
+    stageW: safeW,
+    stageH,
+    topBandH,
+    bottomBandH,
+    totalH: topBandH + stageH + bottomBandH,
+    pills
+  };
 }
 
 function getReadingTimestampMillis(read: any): number {
@@ -1334,6 +1592,7 @@ export default function App() {
   });
   const boardRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const [draggingCharId, setDraggingCharId] = useState<string | null>(null);
   const [stageWidth, setStageWidth] = useState<number>(() =>
     typeof window !== 'undefined' && window.innerWidth < 640 ? 340 : 800
   );
@@ -1658,82 +1917,84 @@ export default function App() {
     }
   };
 
-  const renderShape = (shape: string, color: string, size: 'normal' | 'small' = 'normal') => {
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  const renderShape = (
+    shape: string,
+    color: string,
+    size: 'normal' | 'small' = 'normal',
+    densityScale: number = 1,
+    badgeNumber?: number,
+    stageWidthOverride?: number
+  ) => {
+    const activeStageW = typeof stageWidthOverride === 'number' ? stageWidthOverride : stageWidth;
+    const isMobile = activeStageW < 640;
     const baseScale = size === 'small' ? 0.6 : 1;
-    const finalScale = isMobile && size === 'normal' ? 0.75 : baseScale;
-    
-    // Determine dimensions based on shape string
-    let bodyWidth = 40;
-    let bodyHeight = 64;
-    let headSize = 32;
-    let isConical = shape.includes('conical');
-    let isFlat = shape.includes('flat');
-    let isBlock = shape === 'block';
-
-    if (shape.includes('large')) {
-      bodyWidth = 48;
-      bodyHeight = 80;
-      headSize = 36;
-    } else if (shape.includes('medium')) {
-      bodyWidth = 40;
-      bodyHeight = 64;
-      headSize = 32;
-    } else if (shape.includes('small')) {
-      bodyWidth = 32;
-      bodyHeight = 48;
-      headSize = 28;
-    } else if (isBlock) {
-      bodyWidth = 32;
-      bodyHeight = 24;
-      headSize = 0;
-    }
+    const finalScale = (isMobile && size === 'normal' ? 0.75 : baseScale) * (size === 'normal' ? densityScale : 1);
+    const { bodyWidth, bodyHeight, headSize, isConical, isFlat, isBlock } = getShapeBaseDimensions(shape);
 
     return (
-      <div
-        className="relative flex flex-col items-center justify-center pointer-events-none"
-        style={{
-          transform: `scale(${finalScale})`,
-          transformOrigin: size === 'normal' ? 'bottom center' : 'center'
-        }}
-      >
-        {/* Head */}
-        {!isBlock && !isFlat && (
-          <div 
-            className="rounded-full border border-black/10 shadow-sm z-10"
-            style={{ 
-              backgroundColor: color, 
-              width: headSize, 
-              height: headSize,
-              marginBottom: -headSize/4
-            }}
-          >
-            <div className="flex justify-center gap-1.5" style={{ marginTop: headSize * 0.4 }}>
-              <div className="w-1 h-1 bg-black/60 rounded-full"></div>
-              <div className="w-1 h-1 bg-black/60 rounded-full"></div>
-            </div>
-          </div>
-        )}
-        
-        {/* Body */}
-        <div 
-          className="border border-black/10 shadow-sm relative"
-          style={{ 
-            backgroundColor: color,
-            width: bodyWidth,
-            height: bodyHeight,
-            borderRadius: isConical ? '4px 4px 12px 12px' : isFlat ? '4px 4px 8px 8px' : '6px 6px 12px 12px',
-            clipPath: isConical ? 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)' : 'none'
+      <div className="relative flex flex-col items-center justify-end pointer-events-none">
+        <div
+          className="relative flex flex-col items-center justify-center pointer-events-none"
+          style={{
+            transform: `scale(${finalScale})`,
+            transformOrigin: size === 'normal' ? 'bottom center' : 'center'
           }}
         >
-          {/* Eyes for flat-top characters */}
-          {isFlat && (
-            <div className="flex justify-center gap-1.5 mt-3">
-              <div className="w-1 h-1 bg-black/60 rounded-full"></div>
-              <div className="w-1 h-1 bg-black/60 rounded-full"></div>
+          {/* Head */}
+          {!isBlock && !isFlat && (
+            <div 
+              className="rounded-full border border-black/10 shadow-sm z-10"
+              style={{ 
+                backgroundColor: color, 
+                width: headSize, 
+                height: headSize,
+                marginBottom: -headSize / 4
+              }}
+            >
+              <div className="flex justify-center gap-1.5" style={{ marginTop: headSize * 0.4 }}>
+                <div className="w-1 h-1 bg-black/60 rounded-full"></div>
+                <div className="w-1 h-1 bg-black/60 rounded-full"></div>
+              </div>
             </div>
           )}
+          
+          {/* Body */}
+          <div 
+            className="border border-black/10 shadow-sm relative"
+            style={{ 
+              backgroundColor: color,
+              width: bodyWidth,
+              height: bodyHeight,
+              borderRadius: isConical ? '4px 4px 12px 12px' : isFlat ? '4px 4px 8px 8px' : '6px 6px 12px 12px',
+              clipPath: isConical ? 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)' : 'none'
+            }}
+          >
+            {/* Eyes for flat-top characters */}
+            {isFlat && (
+              <div className="flex justify-center gap-1.5 mt-3">
+                <div className="w-1 h-1 bg-black/60 rounded-full"></div>
+                <div className="w-1 h-1 bg-black/60 rounded-full"></div>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Piccolo numero leggibile sul corpo quando ci sono oltre 12 figure */}
+        {typeof badgeNumber === 'number' && (
+          <div
+            className="absolute left-1/2 z-20 flex items-center justify-center rounded-full bg-white text-[#4a3f35] border border-[#5a5a40] font-bold shadow-sm leading-none pointer-events-none"
+            style={{
+              bottom: `${Math.max(2, (bodyHeight * finalScale) * (isFlat ? 0.34 : 0.46))}px`,
+              transform: 'translate(-50%, 50%)',
+              minWidth: '16px',
+              height: '16px',
+              padding: '0 3px',
+              fontSize: '9px'
+            }}
+          >
+            {badgeNumber}
+          </div>
+        )}
       </div>
     );
   };
@@ -1874,7 +2135,7 @@ export default function App() {
                             </button>
                           </div>
                         </div>
-                        {read.screenshotUrl && (
+                        {read.screenshotUrl ? (
                           <button
                             type="button"
                             onClick={() => window.open(read.screenshotUrl, '_blank')}
@@ -1883,6 +2144,129 @@ export default function App() {
                           >
                             <img src={read.screenshotUrl} alt="Costellazione del cliente" className="w-full max-h-[360px] object-contain" referrerPolicy="no-referrer" />
                           </button>
+                        ) : read.userData?.layoutVersion === 2 && Array.isArray(read.characters) && read.characters.length > 0 && (() => {
+                          const previewW = 560;
+                          const previewChars = read.characters as CharacterType[];
+                          const previewLegendMode = previewChars.length > 12;
+                          const previewDensity = getFigureDensityScale(previewChars.length);
+                          const previewPills = !previewLegendMode ? computePillLayout(previewChars, previewW) : null;
+                          return (
+                            <div className="mb-4 p-3 rounded-2xl border border-[#e5e0d8] bg-[#f8f5f0] overflow-x-auto">
+                              <div
+                                className="relative mx-auto flex flex-col"
+                                style={{
+                                  width: `${previewW}px`,
+                                  paddingTop: previewPills ? `${previewPills.topBandH}px` : undefined,
+                                  height: previewPills ? `${previewPills.totalH}px` : undefined
+                                }}
+                              >
+                                {previewPills && previewPills.pills.length > 0 && (
+                                  <svg
+                                    width={previewPills.stageW}
+                                    height={previewPills.totalH}
+                                    viewBox={`0 0 ${previewPills.stageW} ${previewPills.totalH}`}
+                                    className="absolute top-0 left-0 pointer-events-none z-20"
+                                    style={{ width: `${previewPills.stageW}px`, height: `${previewPills.totalH}px` }}
+                                  >
+                                    {previewPills.pills.map((pill) => (
+                                      <g key={`admin-wire-${read.id}-${pill.char.id}`}>
+                                        <line
+                                          x1={pill.centerX}
+                                          y1={pill.wireStartY}
+                                          x2={pill.figX}
+                                          y2={pill.figAnchorY}
+                                          stroke="#8a7954"
+                                          strokeWidth={1}
+                                          strokeLinecap="round"
+                                        />
+                                        <circle cx={pill.figX} cy={pill.figAnchorY} r={2} fill="#8a7954" />
+                                      </g>
+                                    ))}
+                                  </svg>
+                                )}
+                                <div className="relative w-full aspect-[16/9]">
+                                  <img
+                                    src={STAGE_IMAGE_URL}
+                                    alt="Gradini Costellazione"
+                                    className="relative z-10 w-full h-full object-contain pointer-events-none select-none"
+                                  />
+                                  {previewChars.map((character, idx) => {
+                                    const stair = getCharacterStairV2(character);
+                                    const normX = getCharacterNormalizedX(character);
+                                    const xPct = getStairXRatio(stair, normX) * 100;
+                                    const yPct = STAIR_GEOMETRY[stair].yRatio * 100;
+                                    return (
+                                      <div
+                                        key={`admin-fig-${read.id}-${idx}`}
+                                        className="absolute z-30"
+                                        style={{ left: `${xPct}%`, top: `${yPct}%`, width: 0, height: 0 }}
+                                      >
+                                        <div
+                                          className="absolute bottom-0 left-0 flex justify-center"
+                                          style={{ transform: 'translateX(-50%)' }}
+                                        >
+                                          {renderShape(
+                                            character.shape,
+                                            character.color,
+                                            'normal',
+                                            previewDensity,
+                                            previewLegendMode ? idx + 1 : undefined,
+                                            previewW
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                {previewPills && previewPills.pills.map((pill) => {
+                                  const feelingBorder =
+                                    pill.char.feeling === 'piacevole'
+                                      ? '#4ade80'
+                                      : pill.char.feeling === 'spiacevole'
+                                        ? '#f87171'
+                                        : '#e5e0d8';
+                                  return (
+                                    <div
+                                      key={`admin-pill-${read.id}-${pill.char.id}`}
+                                      className="absolute z-40 px-2.5 bg-white rounded-full shadow-sm border font-medium whitespace-nowrap flex items-center justify-center text-[#4a3f35]"
+                                      style={{
+                                        left: `${pill.centerX}px`,
+                                        top: `${pill.pillTopY}px`,
+                                        height: `${pill.height}px`,
+                                        maxWidth: '170px',
+                                        fontSize: '11px',
+                                        borderColor: feelingBorder,
+                                        transform: 'translateX(-50%)'
+                                      }}
+                                    >
+                                      <span className="truncate">{pill.char.label}</span>
+                                      {pill.char.feeling && (
+                                        <span className="ml-1 shrink-0">{pill.char.feeling === 'piacevole' ? '❤️' : '💔'}</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        {Array.isArray(read.characters) && read.characters.length > 12 && (
+                          <div className="mb-4 p-3 rounded-2xl bg-[#fdfbf7] border border-[#e5e0d8]">
+                            <p className="text-[9px] uppercase tracking-[0.2em] font-black text-[#c2b280] mb-2">
+                              Legenda ({read.characters.length} figure)
+                            </p>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-[11px] text-[#4a3f35]">
+                              {read.characters.map((character: CharacterType, index: number) => (
+                                <div key={`${read.id}-legend-${index}`} className="truncate">
+                                  <span className="font-bold text-[#5a5a40] mr-1">{index + 1}</span>
+                                  <span>{character.label || 'Senza nome'}</span>
+                                  {character.feeling && (
+                                    <span className="ml-1">{character.feeling === 'piacevole' ? '❤️' : '💔'}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                           {read.userData?.layoutVersion !== 2 && (
@@ -1896,9 +2280,13 @@ export default function App() {
                               character.id,
                               read.userData?.layoutVersion
                             );
+                            const isNumbered = Array.isArray(read.characters) && read.characters.length > 12;
                             return (
                               <div key={`${read.id}-standalone-${index}`} className="p-3 rounded-xl bg-[#fdfbf7] border border-[#e5e0d8] text-[10px]">
-                                <p className="font-bold text-[#4a3f35]">{character.label || 'Senza nome'}</p>
+                                <p className="font-bold text-[#4a3f35]">
+                                  {isNumbered ? `${index + 1}. ` : ''}{character.label || 'Senza nome'}
+                                  {character.feeling && <span className="ml-1">{character.feeling === 'piacevole' ? '❤️' : '💔'}</span>}
+                                </p>
                                 <p className="opacity-70">{position ? position.summary : 'layout precedente: posizione non attendibile'}</p>
                                 <p className="opacity-50">
                                   Coordinate tecniche: {Math.round(character.x)}, {Math.round(character.y)}
@@ -2105,7 +2493,31 @@ export default function App() {
                                           {read.userData && (
                                             <p><strong>Dati sessione:</strong> {read.userData.nome || read.userName || 'N/D'}{read.userData.eta ? `, ${read.userData.eta} anni` : ''}{read.userData.sesso ? `, ${read.userData.sesso}` : ''}{read.userData.domandaRune ? ` — ${read.userData.domandaRune}` : ''}</p>
                                           )}
+                                          {read.screenshotUrl && (
+                                            <button
+                                              type="button"
+                                              onClick={() => window.open(read.screenshotUrl, '_blank')}
+                                              className="block w-full rounded-xl overflow-hidden border border-[#e5e0d8] bg-white"
+                                              title="Apri immagine della costellazione"
+                                            >
+                                              <img src={read.screenshotUrl} alt="Costellazione del cliente" className="w-full max-h-[220px] object-contain" referrerPolicy="no-referrer" />
+                                            </button>
+                                          )}
                                           <p><strong>Elementi posizionati:</strong> {read.characters.length}</p>
+                                          {read.characters.length > 12 && (
+                                            <div className="rounded-xl bg-white/80 border border-[#e5e0d8] p-2">
+                                              <p className="text-[9px] uppercase tracking-widest font-black text-[#c2b280] mb-1">Legenda</p>
+                                              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-[#4a3f35]">
+                                                {read.characters.map((character: CharacterType, index: number) => (
+                                                  <span key={`${read.id}-hist-legend-${index}`} className="truncate">
+                                                    <strong className="text-[#5a5a40] mr-1">{index + 1}</strong>
+                                                    {character.label || 'Senza nome'}
+                                                    {character.feeling ? (character.feeling === 'piacevole' ? ' ❤️' : ' 💔') : ''}
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
                                           <div className="space-y-1">
                                             {read.userData?.layoutVersion !== 2 && (
                                               <p className="px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold">
@@ -2114,8 +2526,10 @@ export default function App() {
                                             )}
                                             {read.characters.map((character: CharacterType, index: number) => (
                                               <div key={`${read.id}-character-${index}`} className="rounded-xl bg-white/70 border border-[#e5e0d8] p-2">
-                                                <span className="font-bold text-[#4a3f35]">{character.label || 'Senza nome'}</span>
-                                                {character.feeling && <span> · Emozione: {character.feeling}</span>}
+                                                <span className="font-bold text-[#4a3f35]">
+                                                  {read.characters.length > 12 ? `${index + 1}. ` : ''}{character.label || 'Senza nome'}
+                                                </span>
+                                                {character.feeling && <span> · Emozione: {character.feeling} {character.feeling === 'piacevole' ? '❤️' : '💔'}</span>}
                                                 {character.memory && <span> · Memoria: {character.memory}</span>}
                                                 {(() => {
                                                   const position = describeCharacterPosition(
@@ -2642,119 +3056,245 @@ export default function App() {
                 </span>
               </button>
 
-              {/* Stage / Board (vista frontale 2D, proporzioni 16:9 senza trasformazioni 3D) */}
-              <div 
-                ref={stageRef}
-                data-constellation-stage="true"
-                className="relative w-full max-w-[800px] aspect-[16/9] mt-14 sm:mt-8 select-none"
-              >
-                <img 
-                  src={STAGE_IMAGE_URL} 
-                  alt="Gradini Costellazione" 
-                  className="w-full h-full object-contain pointer-events-none select-none"
-                />
+              {(() => {
+                const useLegendMode = characters.length > 12;
+                const densityScale = getFigureDensityScale(characters.length);
+                const pillLayout = !useLegendMode ? computePillLayout(characters, stageWidth) : null;
 
-                {/* Draggable Characters */}
-                {(() => {
-                  const labelOffsets = computeLabelOffsets(characters, stageWidth);
-                  return characters.map((char) => {
-                    const xPct = getStairXRatio(char.stair, char.normalizedX) * 100;
-                    const yPct = STAIR_GEOMETRY[char.stair].yRatio * 100;
-                    return (
-                      <div
-                        key={char.id}
-                        className="absolute z-40"
-                        style={{ left: `${xPct}%`, top: `${yPct}%`, width: 0, height: 0 }}
-                      >
-                        <motion.div
-                          key={`${char.id}-${char.snapSeq || 0}`}
-                          drag={workflowStep === 0 || char.label.toLowerCase() === 'io'}
-                          dragMomentum={false}
-                          initial={char.snapSeq ? false : { scale: 0 }}
-                          animate={{ scale: 1 }}
-                          onDragEnd={() => {
-                            const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${char.id}"]`) as HTMLElement | null;
-                            const stageEl = stageRef.current;
-                            if (!figEl || !stageEl) return;
-                            const figRect = figEl.getBoundingClientRect();
-                            const stageRect = stageEl.getBoundingClientRect();
-                            if (stageRect.width <= 0 || stageRect.height <= 0) return;
-
-                            const centerX = (figRect.left + figRect.right) / 2;
-                            const baseBottomY = figRect.bottom;
-                            const xRatio = (centerX - stageRect.left) / stageRect.width;
-                            const yRatio = (baseBottomY - stageRect.top) / stageRect.height;
-
-                            const nextPlacement = snapStageRatioToStair(xRatio, yRatio);
-                            setCharacters(prev => prev.map(c =>
-                              c.id === char.id
-                                ? {
-                                    ...c,
-                                    stair: nextPlacement.stair,
-                                    normalizedX: nextPlacement.normalizedX,
-                                    x: nextPlacement.x,
-                                    y: nextPlacement.y,
-                                    snapSeq: (c.snapSeq || 0) + 1
-                                  }
-                                : c
-                            ));
-                          }}
-                          onClick={() => handleCharacterClick(char)}
-                          className={`relative group ${
-                            (workflowStep === 0 || char.label.toLowerCase() === 'io') 
-                              ? 'cursor-grab active:cursor-grabbing' 
-                              : workflowStep === 1 
-                                ? 'cursor-pointer' 
-                                : ''
-                          }`}
-                          style={{ width: 0, height: 0 }}
+                return (
+                  <div className="w-full max-w-[800px] mt-14 sm:mt-10 flex flex-col items-center select-none">
+                    {/* Wrapper con bande pillole (<=12) + fili SVG 1px + stage 16:9 */}
+                    <div
+                      className="relative w-full flex flex-col"
+                      style={
+                        pillLayout
+                          ? { height: `${pillLayout.totalH}px`, paddingTop: `${pillLayout.topBandH}px` }
+                          : undefined
+                      }
+                    >
+                      {/* Fili SVG 1px che collegano pillole <-> testa (gradino superiore) o base (gradino inferiore) */}
+                      {pillLayout && pillLayout.pills.length > 0 && (
+                        <svg
+                          width={pillLayout.stageW}
+                          height={pillLayout.totalH}
+                          viewBox={`0 0 ${pillLayout.stageW} ${pillLayout.totalH}`}
+                          className="absolute top-0 left-0 pointer-events-none z-20"
+                          style={{ width: `${pillLayout.stageW}px`, height: `${pillLayout.totalH}px` }}
                         >
-                          {/* Figura ancorata con la base sulla superficie del gradino (0, 0) */}
-                          <div
-                            data-char-figure-id={char.id}
-                            className={`absolute bottom-0 left-0 flex justify-center ${
-                              workflowStep === 1 && char.label.toLowerCase() !== 'io'
-                                ? 'hover:ring-2 hover:ring-[#5a5a40] rounded-2xl transition-all'
-                                : ''
-                            }`}
-                            style={{ transform: 'translateX(-50%)' }}
-                          >
-                            {renderShape(char.shape, char.color)}
-                            {workflowStep === 0 && (
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeCharacter(char.id);
-                                }}
-                                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md pointer-events-auto"
-                              >
-                                <X size={12} />
-                              </button>
-                            )}
-                          </div>
+                          {pillLayout.pills.map((pill) => (
+                            <g key={`wire-${pill.char.id}`}>
+                              <line
+                                x1={pill.centerX}
+                                y1={pill.wireStartY}
+                                x2={pill.figX}
+                                y2={pill.figAnchorY}
+                                stroke="#8a7954"
+                                strokeWidth={1}
+                                strokeLinecap="round"
+                              />
+                              <circle
+                                cx={pill.figX}
+                                cy={pill.figAnchorY}
+                                r={2}
+                                fill="#8a7954"
+                              />
+                            </g>
+                          ))}
+                        </svg>
+                      )}
 
-                          {/* Etichetta sotto la base della figura, sfalsata in verticale se sovrapposta */}
-                          <div
-                            className={`absolute left-0 px-3 py-1 bg-white/95 rounded-full shadow-sm border border-[#e5e0d8] text-xs font-medium whitespace-nowrap ${char.feeling === 'piacevole' ? 'border-green-400' : char.feeling === 'spiacevole' ? 'border-red-400' : ''}`}
+                      {/* Stage / Board (vista frontale 2D, proporzioni 16:9 senza trasformazioni 3D) */}
+                      <div 
+                        ref={stageRef}
+                        data-constellation-stage="true"
+                        className="relative w-full aspect-[16/9] select-none"
+                      >
+                        <img 
+                          src={STAGE_IMAGE_URL} 
+                          alt="Gradini Costellazione" 
+                          className="relative z-10 w-full h-full object-contain pointer-events-none select-none"
+                        />
+
+                        {/* Draggable Characters */}
+                        {characters.map((char, charIndex) => {
+                          const xPct = getStairXRatio(char.stair, char.normalizedX) * 100;
+                          const yPct = STAIR_GEOMETRY[char.stair].yRatio * 100;
+                          const isDragging = draggingCharId === char.id;
+                          return (
+                            <div
+                              key={char.id}
+                              className={`absolute ${isDragging ? 'z-50' : 'z-30'}`}
+                              style={{ left: `${xPct}%`, top: `${yPct}%`, width: 0, height: 0 }}
+                            >
+                              <motion.div
+                                key={`${char.id}-${char.snapSeq || 0}`}
+                                drag={workflowStep === 0 || char.label.toLowerCase() === 'io'}
+                                dragMomentum={false}
+                                initial={char.snapSeq ? false : { scale: 0 }}
+                                animate={{ scale: 1 }}
+                                onDragStart={() => setDraggingCharId(char.id)}
+                                onDragEnd={() => {
+                                  setDraggingCharId(null);
+                                  const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${char.id}"]`) as HTMLElement | null;
+                                  const stageEl = stageRef.current;
+                                  if (!figEl || !stageEl) return;
+                                  const figRect = figEl.getBoundingClientRect();
+                                  const stageRect = stageEl.getBoundingClientRect();
+                                  if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+                                  const centerX = (figRect.left + figRect.right) / 2;
+                                  const baseBottomY = figRect.bottom;
+                                  const xRatio = (centerX - stageRect.left) / stageRect.width;
+                                  const yRatio = (baseBottomY - stageRect.top) / stageRect.height;
+
+                                  const snapped = snapStageRatioToStair(xRatio, yRatio);
+                                  const sameStairOthers = characters
+                                    .filter(other => other.id !== char.id && other.stair === snapped.stair)
+                                    .map(other => other.normalizedX);
+                                  const finalNormalizedX = nudgeNormalizedXOnStair(
+                                    snapped.stair,
+                                    snapped.normalizedX,
+                                    sameStairOthers,
+                                    densityScale
+                                  );
+                                  const finalX = Math.round(getStairXRatio(snapped.stair, finalNormalizedX) * STAGE_REF_WIDTH);
+
+                                  setCharacters(prev => prev.map(c =>
+                                    c.id === char.id
+                                      ? {
+                                          ...c,
+                                          stair: snapped.stair,
+                                          normalizedX: finalNormalizedX,
+                                          x: finalX,
+                                          y: snapped.y,
+                                          snapSeq: (c.snapSeq || 0) + 1
+                                        }
+                                      : c
+                                  ));
+                                }}
+                                onClick={() => handleCharacterClick(char)}
+                                className={`relative group ${
+                                  (workflowStep === 0 || char.label.toLowerCase() === 'io') 
+                                    ? 'cursor-grab active:cursor-grabbing' 
+                                    : workflowStep === 1 
+                                      ? 'cursor-pointer' 
+                                      : ''
+                                }`}
+                                style={{
+                                  width: 0,
+                                  height: 0,
+                                  opacity: isDragging ? 0.55 : 1,
+                                  transition: 'opacity 120ms ease'
+                                }}
+                              >
+                                {/* Figura ancorata con la base sulla superficie del gradino (0, 0) */}
+                                <div
+                                  data-char-figure-id={char.id}
+                                  className={`absolute bottom-0 left-0 flex justify-center ${
+                                    workflowStep === 1 && char.label.toLowerCase() !== 'io'
+                                      ? 'hover:ring-2 hover:ring-[#5a5a40] rounded-2xl transition-all'
+                                      : ''
+                                  }`}
+                                  style={{ transform: 'translateX(-50%)' }}
+                                >
+                                  {renderShape(
+                                    char.shape,
+                                    char.color,
+                                    'normal',
+                                    densityScale,
+                                    useLegendMode ? charIndex + 1 : undefined
+                                  )}
+                                  {workflowStep === 0 && (
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeCharacter(char.id);
+                                      }}
+                                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md pointer-events-auto"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              </motion.div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Pillole SOPRA (gradino superiore) e SOTTO (gradino inferiore) fino a 12 figure */}
+                      {pillLayout && pillLayout.pills.map((pill) => {
+                        const feelingBorder =
+                          pill.char.feeling === 'piacevole'
+                            ? '#4ade80'
+                            : pill.char.feeling === 'spiacevole'
+                              ? '#f87171'
+                              : '#e5e0d8';
+                        return (
+                          <button
+                            key={`pill-${pill.char.id}`}
+                            type="button"
+                            onClick={() => handleCharacterClick(pill.char)}
+                            className={`absolute z-40 px-2.5 bg-white rounded-full shadow-sm border font-medium whitespace-nowrap flex items-center justify-center text-[#4a3f35] ${
+                              workflowStep === 1 && pill.char.label.toLowerCase() !== 'io'
+                                ? 'cursor-pointer hover:border-[#5a5a40]'
+                                : 'cursor-default'
+                            }`}
                             style={{
-                              top: `${6 + (labelOffsets[char.id] || 0)}px`,
+                              left: `${pill.centerX}px`,
+                              top: `${pill.pillTopY}px`,
+                              height: `${pill.height}px`,
+                              maxWidth: stageWidth < 640 ? '160px' : '210px',
+                              fontSize: stageWidth < 640 ? '11px' : '12px',
+                              borderColor: feelingBorder,
                               transform: 'translateX(-50%)'
                             }}
                             translate="no"
                           >
-                            {char.label}
-                            {char.feeling && (
-                              <span className="ml-1">
-                                {char.feeling === 'piacevole' ? '❤️' : '💔'}
+                            <span className="truncate">{pill.char.label}</span>
+                            {pill.char.feeling && (
+                              <span className="ml-1 shrink-0">
+                                {pill.char.feeling === 'piacevole' ? '❤️' : '💔'}
                               </span>
                             )}
-                          </div>
-                        </motion.div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Legenda multi-colonna sotto il piano quando ci sono oltre 12 figure */}
+                    {useLegendMode && (
+                      <div
+                        className="mt-4 w-full bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl px-4 py-3 shadow-sm text-[#4a3f35]"
+                        translate="no"
+                      >
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs">
+                          {characters.map((char, index) => (
+                            <button
+                              key={`legend-${char.id}`}
+                              type="button"
+                              onClick={() => handleCharacterClick(char)}
+                              className={`flex items-center gap-1.5 text-left truncate rounded-lg px-1.5 py-0.5 ${
+                                workflowStep === 1 && char.label.toLowerCase() !== 'io'
+                                  ? 'hover:bg-white cursor-pointer'
+                                  : 'cursor-default'
+                              }`}
+                            >
+                              <span className="font-bold text-[#5a5a40] shrink-0">{index + 1}</span>
+                              <span className="truncate font-medium">{char.label}</span>
+                              {char.feeling && (
+                                <span className="shrink-0">
+                                  {char.feeling === 'piacevole' ? '❤️' : '💔'}
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    );
-                  });
-                })()}
-              </div>
+                    )}
+                  </div>
+                );
+              })()}
             </main>
           </motion.div>
         ) : currentPage === 'rune' ? (
