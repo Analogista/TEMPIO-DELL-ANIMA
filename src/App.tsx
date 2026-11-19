@@ -190,6 +190,39 @@ function snapStageRatioToStair(xRatio: number, yRatio: number): {
   };
 }
 
+function detectPendingDropStair(xRatio: number, yRatio: number): {
+  stair: 'upper' | 'lower';
+  normalizedX: number;
+  x: number;
+  y: number;
+} | null {
+  const upperMinX = STAIR_GEOMETRY.upper.minXRatio - 0.04;
+  const upperMaxX = STAIR_GEOMETRY.upper.maxXRatio + 0.04;
+  const lowerMinX = STAIR_GEOMETRY.lower.minXRatio - 0.04;
+  const lowerMaxX = STAIR_GEOMETRY.lower.maxXRatio + 0.04;
+  const midY = (STAIR_GEOMETRY.upper.yRatio + STAIR_GEOMETRY.lower.yRatio) / 2;
+
+  let stair: 'upper' | 'lower' | null = null;
+  if (yRatio >= 0.22 && yRatio <= midY && xRatio >= upperMinX && xRatio <= upperMaxX) {
+    stair = 'upper';
+  } else if (yRatio > midY && yRatio <= 0.96 && xRatio >= lowerMinX && xRatio <= lowerMaxX) {
+    stair = 'lower';
+  }
+  if (!stair) return null;
+
+  const geom = STAIR_GEOMETRY[stair];
+  const clampedXRatio = Math.min(geom.maxXRatio, Math.max(geom.minXRatio, xRatio));
+  const rawNormalizedX = (clampedXRatio - geom.minXRatio) / (geom.maxXRatio - geom.minXRatio);
+  const normalizedX = Math.round(clamp01(rawNormalizedX) * 1000) / 1000;
+  const snappedXRatio = getStairXRatio(stair, normalizedX);
+  return {
+    stair,
+    normalizedX,
+    x: Math.round(snappedXRatio * STAGE_REF_WIDTH),
+    y: Math.round(geom.yRatio * STAGE_REF_HEIGHT)
+  };
+}
+
 type ShapeDimensions = {
   bodyWidth: number;
   bodyHeight: number;
@@ -452,7 +485,7 @@ function computePillLayout(characters: CharacterType[], stageWidth: number): Pil
   const densityScale = getFigureDensityScale(characters.length);
   const effectiveScale = (isMobileStage ? 0.75 : 1) * densityScale;
 
-  const PILL_H = isMobileStage ? 24 : 26;
+  const PILL_H = isMobileStage ? 26 : 28;
   const LANE_GAP = 8;
   const LANE_STEP = PILL_H + LANE_GAP;
   const MIN_H_GAP = 8;
@@ -625,6 +658,38 @@ function computePillLayout(characters: CharacterType[], stageWidth: number): Pil
     totalH: topBandH + stageH + bottomBandH,
     pills
   };
+}
+
+function splitWhatsAppLegendMessages(text: string, maxChars: number = 1500): string[] {
+  if (text.length <= maxChars) return [text];
+  const lines = text.split('\n');
+  const rawChunks: string[] = [];
+  const effectiveLimit = maxChars - 16;
+  let current = '';
+
+  for (const line of lines) {
+    if (line.length > effectiveLimit) {
+      if (current) {
+        rawChunks.push(current);
+        current = '';
+      }
+      for (let start = 0; start < line.length; start += effectiveLimit) {
+        rawChunks.push(line.slice(start, start + effectiveLimit));
+      }
+      continue;
+    }
+    const candidate = current ? `${current}\n${line}` : line;
+    if (candidate.length <= effectiveLimit) {
+      current = candidate;
+    } else {
+      if (current) rawChunks.push(current);
+      current = line;
+    }
+  }
+  if (current) rawChunks.push(current);
+
+  if (rawChunks.length <= 1) return rawChunks;
+  return rawChunks.map((chunk, idx) => `(${idx + 1}/${rawChunks.length})\n${chunk}`);
 }
 
 function getReadingTimestampMillis(read: any): number {
@@ -902,8 +967,170 @@ function clearBrowserCandidacyData() {
   clearMatchingKeys(window.sessionStorage);
 }
 
+type PendingCharacterType = {
+  id: string;
+  shape: CharacterType['shape'];
+  color: string;
+  label: string;
+  snapSeq: number;
+};
+
+function AdminConstellationPreview({
+  readId,
+  characters,
+  renderFigure
+}: {
+  readId: string;
+  characters: CharacterType[];
+  renderFigure: (
+    shape: string,
+    color: string,
+    densityScale: number,
+    badgeNumber: number | undefined,
+    previewWidth: number
+  ) => React.ReactNode;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [previewW, setPreviewW] = useState<number>(320);
+
+  useEffect(() => {
+    const updateWidth = () => {
+      if (containerRef.current?.clientWidth) {
+        setPreviewW(containerRef.current.clientWidth);
+      }
+    };
+    updateWidth();
+    let observer: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver((entries) => {
+        const w = entries[0]?.contentRect?.width;
+        if (w && w > 0) setPreviewW(w);
+      });
+      observer.observe(containerRef.current);
+    }
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, []);
+
+  const previewChars = characters.map((c) => ({
+    ...c,
+    stair: getCharacterStairV2(c),
+    normalizedX: getCharacterNormalizedX(c)
+  }));
+  const previewLegendMode = previewChars.length > 12;
+  const previewDensity = getFigureDensityScale(previewChars.length);
+  const previewPills = !previewLegendMode ? computePillLayout(previewChars, previewW) : null;
+
+  return (
+    <div className="mb-4 p-3 rounded-2xl border border-[#e5e0d8] bg-[#f8f5f0] w-full">
+      <div
+        ref={containerRef}
+        className="relative w-full flex flex-col"
+        style={
+          previewPills
+            ? { paddingTop: `${previewPills.topBandH}px`, height: `${previewPills.totalH}px` }
+            : undefined
+        }
+      >
+        {previewPills && previewPills.pills.length > 0 && (
+          <svg
+            width={previewPills.stageW}
+            height={previewPills.totalH}
+            viewBox={`0 0 ${previewPills.stageW} ${previewPills.totalH}`}
+            className="absolute top-0 left-0 pointer-events-none z-20"
+            style={{ width: `${previewPills.stageW}px`, height: `${previewPills.totalH}px` }}
+          >
+            {previewPills.pills.map((pill) => (
+              <g key={`admin-wire-${readId}-${pill.char.id}`}>
+                <line
+                  x1={pill.centerX}
+                  y1={pill.wireStartY}
+                  x2={pill.figX}
+                  y2={pill.figAnchorY}
+                  stroke="#8a7954"
+                  strokeWidth={1}
+                  strokeLinecap="round"
+                />
+                <circle cx={pill.figX} cy={pill.figAnchorY} r={2} fill="#8a7954" />
+              </g>
+            ))}
+          </svg>
+        )}
+        <div className="relative w-full aspect-[16/9]">
+          <img
+            src={STAGE_IMAGE_URL}
+            alt="Gradini Costellazione"
+            className="relative z-10 w-full h-full object-contain pointer-events-none select-none"
+          />
+          {previewChars.map((character, idx) => {
+            const xPct = getStairXRatio(character.stair, character.normalizedX) * 100;
+            const yPct = STAIR_GEOMETRY[character.stair].yRatio * 100;
+            return (
+              <div
+                key={`admin-fig-${readId}-${idx}`}
+                className="absolute z-30"
+                style={{ left: `${xPct}%`, top: `${yPct}%`, width: 0, height: 0 }}
+              >
+                <div
+                  className="absolute bottom-0 left-0 flex justify-center"
+                  style={{ transform: 'translateX(-50%)' }}
+                >
+                  {renderFigure(
+                    character.shape,
+                    character.color,
+                    previewDensity,
+                    previewLegendMode ? idx + 1 : undefined,
+                    previewW
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {previewPills && previewPills.pills.map((pill) => {
+          const feelingBorder =
+            pill.char.feeling === 'piacevole'
+              ? '#4ade80'
+              : pill.char.feeling === 'spiacevole'
+                ? '#f87171'
+                : '#e5e0d8';
+          return (
+            <div
+              key={`admin-pill-${readId}-${pill.char.id}`}
+              className="absolute z-40 px-2.5 bg-white rounded-full shadow-sm border font-medium whitespace-nowrap flex items-center justify-center text-[#4a3f35]"
+              style={{
+                left: `${pill.centerX}px`,
+                top: `${pill.pillTopY}px`,
+                minHeight: `${pill.height}px`,
+                height: 'auto',
+                paddingTop: '3px',
+                paddingBottom: '3px',
+                lineHeight: 1.4,
+                maxWidth: previewW < 640 ? '140px' : '190px',
+                fontSize: previewW < 640 ? '10px' : '11px',
+                borderColor: feelingBorder,
+                transform: 'translateX(-50%)'
+              }}
+            >
+              <span className="truncate">{pill.char.label}</span>
+              {pill.char.feeling && (
+                <span className="ml-1 shrink-0">{pill.char.feeling === 'piacevole' ? '❤️' : '💔'}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [characters, setCharacters] = useState<CharacterType[]>([]);
+  const [pendingCharacter, setPendingCharacter] = useState<PendingCharacterType | null>(null);
+  const [isDraggingPending, setIsDraggingPending] = useState(false);
   const [drawingCharacter, setDrawingCharacter] = useState<{ shape: string, color: string } | null>(null);
   const [tempLabel, setTempLabel] = useState('');
   const [showLabelInput, setShowLabelInput] = useState(false);
@@ -936,9 +1163,17 @@ export default function App() {
     title: string;
     message: string;
     danger?: boolean;
+    confirmLabel?: string;
+    cancelLabel?: string;
     onConfirm?: () => void | Promise<void>;
+    onCancel?: () => void | Promise<void>;
     onClose?: () => void | Promise<void>;
   } | null>(null);
+  const [shareLegendModal, setShareLegendModal] = useState<{
+    messages: string[];
+    fullText: string;
+  } | null>(null);
+  const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
 
   const showAlert = (title: string, message: string, onClose?: () => void | Promise<void>) => {
     setAppDialog({ mode: 'alert', title, message, onClose });
@@ -948,9 +1183,18 @@ export default function App() {
     title: string,
     message: string,
     onConfirm: () => void | Promise<void>,
-    options?: { danger?: boolean }
+    options?: { danger?: boolean; confirmLabel?: string; cancelLabel?: string; onCancel?: () => void | Promise<void> }
   ) => {
-    setAppDialog({ mode: 'confirm', title, message, danger: options?.danger, onConfirm });
+    setAppDialog({
+      mode: 'confirm',
+      title,
+      message,
+      danger: options?.danger,
+      confirmLabel: options?.confirmLabel,
+      cancelLabel: options?.cancelLabel,
+      onConfirm,
+      onCancel: options?.onCancel
+    });
   };
 
   const openCandidacyModal = () => {
@@ -1145,6 +1389,8 @@ export default function App() {
     setSelectedFlower(null);
     setFlowerSearch('');
     setCharacters([]);
+    setPendingCharacter(null);
+    setIsDraggingPending(false);
     setDrawingCharacter(null);
     setTempLabel('');
     setShowLabelInput(false);
@@ -1161,6 +1407,8 @@ export default function App() {
     setShowCandidacyModal(false);
     setSubmissionResult(null);
     setAppDialog(null);
+    setShareLegendModal(null);
+    setFullscreenImageUrl(null);
     setUserData({ ...INITIAL_USER_DATA });
     lastSavedRuneKeyRef.current = null;
     lastSavedFlowerKeyRef.current = null;
@@ -1373,10 +1621,79 @@ export default function App() {
           sanitizeCanvasClone(clonedDoc);
           const shareBtn = clonedDoc.querySelector('[title="Invia a Graziamaria"]');
           if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
+          clonedDoc.querySelectorAll<HTMLElement>('[data-constellation-neutral="true"]').forEach((neutralEl) => {
+            neutralEl.style.display = 'none';
+          });
           const main = clonedDoc.querySelector('main');
           if (main) {
             main.style.overflow = 'visible';
           }
+
+          // Evita qualsiasi taglio inferiore sulle scritte delle pillole
+          const pillEls = clonedDoc.querySelectorAll<HTMLElement>('[data-constellation-pill="true"]');
+          pillEls.forEach((pillEl) => {
+            pillEl.classList.remove('leading-none', 'truncate');
+            pillEl.style.lineHeight = '1.5';
+            pillEl.style.paddingTop = '4px';
+            pillEl.style.paddingBottom = '4px';
+            pillEl.style.height = 'auto';
+            pillEl.style.minHeight = '28px';
+            pillEl.style.overflow = 'visible';
+            pillEl.style.maxWidth = 'none';
+
+            pillEl.querySelectorAll<HTMLElement>('span').forEach((spanEl) => {
+              spanEl.classList.remove('truncate', 'leading-none');
+              spanEl.style.lineHeight = '1.5';
+              spanEl.style.overflow = 'visible';
+              spanEl.style.textOverflow = 'clip';
+              spanEl.style.height = 'auto';
+              spanEl.style.paddingTop = '2px';
+              spanEl.style.paddingBottom = '2px';
+            });
+
+            const centerXAttr = Number(pillEl.getAttribute('data-pill-center-x'));
+            pillEl.style.transform = 'none';
+            if (Number.isFinite(centerXAttr)) {
+              const measuredW =
+                pillEl.getBoundingClientRect().width ||
+                pillEl.offsetWidth ||
+                Number(pillEl.getAttribute('data-pill-width')) ||
+                80;
+              pillEl.style.left = `${centerXAttr}px`;
+              pillEl.style.marginLeft = `${-Math.round(measuredW / 2)}px`;
+            }
+          });
+
+          // Evita tagli sui badge numerici (oltre 12 figure)
+          const badgeEls = clonedDoc.querySelectorAll<HTMLElement>('[data-constellation-badge="true"]');
+          badgeEls.forEach((badgeEl) => {
+            badgeEl.classList.remove('leading-none');
+            badgeEl.style.lineHeight = '1.5';
+            badgeEl.style.paddingTop = '4px';
+            badgeEl.style.paddingBottom = '4px';
+            badgeEl.style.height = 'auto';
+            badgeEl.style.overflow = 'visible';
+            badgeEl.style.transform = 'none';
+            const bw = badgeEl.getBoundingClientRect().width || badgeEl.offsetWidth || 18;
+            const bh = badgeEl.getBoundingClientRect().height || badgeEl.offsetHeight || 22;
+            badgeEl.style.marginLeft = `${-Math.round(bw / 2)}px`;
+            badgeEl.style.marginBottom = `${-Math.round(bh / 2)}px`;
+          });
+
+          // Evita tagli nella legenda multi-colonna
+          const legendEls = clonedDoc.querySelectorAll<HTMLElement>(
+            '[data-constellation-legend="true"], [data-constellation-legend="true"] *'
+          );
+          legendEls.forEach((legendEl) => {
+            legendEl.classList.remove('truncate', 'leading-none');
+            legendEl.style.lineHeight = '1.5';
+            legendEl.style.overflow = 'visible';
+            legendEl.style.height = 'auto';
+            if (legendEl.hasAttribute('data-constellation-legend-item')) {
+              legendEl.style.paddingTop = '4px';
+              legendEl.style.paddingBottom = '4px';
+            }
+          });
         }
       });
       return await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png', 0.9));
@@ -1386,14 +1703,19 @@ export default function App() {
     }
   };
 
+  const uploadConstellationBlob = async (blob: Blob) => {
+    if (!user) throw new Error('Utente non autenticato.');
+    const screenshotRef = ref(storage, `constellations/${user.uid}/${crypto.randomUUID()}_costellazione.png`);
+    await uploadBytes(screenshotRef, blob, { contentType: 'image/png' });
+    return await getDownloadURL(screenshotRef);
+  };
+
   const uploadConstellationScreenshot = async () => {
     if (!user) throw new Error('Utente non autenticato.');
     try {
       const blob = await captureConstellationBlob();
       if (!blob) throw new Error('Impossibile generare l’immagine della costellazione (blob nullo).');
-      const screenshotRef = ref(storage, `constellations/${user.uid}/${crypto.randomUUID()}_costellazione.png`);
-      await uploadBytes(screenshotRef, blob, { contentType: 'image/png' });
-      return await getDownloadURL(screenshotRef);
+      return await uploadConstellationBlob(blob);
     } catch (error: any) {
       console.error('[uploadConstellationScreenshot] Errore completo:', error?.message || error, error);
       throw error;
@@ -1592,6 +1914,7 @@ export default function App() {
   });
   const boardRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const neutralAreaRef = useRef<HTMLDivElement>(null);
   const [draggingCharId, setDraggingCharId] = useState<string | null>(null);
   const [stageWidth, setStageWidth] = useState<number>(() =>
     typeof window !== 'undefined' && window.innerWidth < 640 ? 340 : 800
@@ -1637,15 +1960,27 @@ export default function App() {
   }, [currentPage]);
 
   const handleDraw = () => {
+    if (pendingCharacter) return;
     const randomShape = CHARACTER_SHAPES[Math.floor(Math.random() * CHARACTER_SHAPES.length)];
     selectCharacter(randomShape);
   };
 
   const selectCharacter = (char: typeof CHARACTER_SHAPES[number]) => {
-    setDrawingCharacter(char);
-    setShowLabelInput(true);
+    if (pendingCharacter) return;
+    setPendingCharacter({
+      id: Math.random().toString(36).substr(2, 9),
+      shape: char.shape as CharacterType['shape'],
+      color: char.color,
+      label: '',
+      snapSeq: 0
+    });
+    setDrawingCharacter(null);
+    setShowLabelInput(false);
     setShowPicker(false);
     setTempLabel('');
+    setTimeout(() => {
+      neutralAreaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 60);
   };
 
   const drawRune = () => {
@@ -1702,7 +2037,7 @@ export default function App() {
     setAnalyzingCharacter(null);
   };
 
-  const generatePDF = async () => {
+  const executeGeneratePDF = async () => {
     const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     const title = "Report Costellazione Sistemica";
@@ -1749,6 +2084,156 @@ export default function App() {
     });
     
     doc.save("report-costellazione.pdf");
+  };
+
+  const promptPendingBeforeAction = (proceedAction: () => void | Promise<void>) => {
+    if (!pendingCharacter) {
+      void proceedAction();
+      return;
+    }
+    showConfirm(
+      'Pupazzo da posizionare',
+      "C'è un pupazzo non ancora posizionato. Vuoi posizionarlo o salvare senza?",
+      proceedAction,
+      {
+        cancelLabel: 'Posiziona',
+        confirmLabel: 'Salva senza',
+        onCancel: () => {
+          neutralAreaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    );
+  };
+
+  const generatePDF = () => {
+    promptPendingBeforeAction(executeGeneratePDF);
+  };
+
+  const executeSaveAndSendConstellation = async () => {
+    if (!user) { showAlert('Accesso richiesto', 'Effettua il login per salvare.'); return; }
+    try {
+      const resolvedChars = resolveCharsWithStair(characters);
+      const currentKey = getConstellationSaveKey(resolvedChars, user.uid);
+      if (lastSavedConstellationKeyRef.current === currentKey) {
+        showAlert(
+          'Costellazione salvata',
+          lastSavedConstellationHasScreenshotRef.current
+            ? 'Costellazione salvata. L’immagine è stata inviata anche all’area admin.'
+            : 'Costellazione già salvata nell’area admin.'
+        );
+        return;
+      }
+
+      let screenshotUrl: string | undefined;
+      try {
+        screenshotUrl = await uploadConstellationScreenshot();
+      } catch (screenshotError: any) {
+        console.error('Errore generazione screenshot:', screenshotError?.message || screenshotError, screenshotError);
+      }
+      const saved = await saveConstellation(resolvedChars, screenshotUrl);
+      if (saved) {
+        await fetchHistory(user.uid);
+        showAlert(
+          'Costellazione salvata',
+          screenshotUrl
+            ? 'Costellazione salvata. L’immagine è stata inviata anche all’area admin.'
+            : 'Costellazione salvata nell’area admin, ma lo screenshot automatico non è stato generato. Fai ora uno screenshot manuale del piano, poi allegalo e invialo separatamente su WhatsApp a Graziamaria insieme al report.'
+        );
+      }
+    } catch (error: any) {
+      console.error('Errore salvataggio costellazione:', error);
+      showAlert('Errore salvataggio', `Impossibile salvare la costellazione. ${error?.message || 'Controlla il collegamento Firebase.'}`);
+    }
+  };
+
+  const executeShare = async () => {
+    if (!boardRef.current || isSharing) return;
+
+    setIsSharing(true);
+
+    const resolvedChars = resolveCharsWithStair(characters);
+    const legendText = buildWhatsAppLegendText(resolvedChars);
+    const legendMessages = splitWhatsAppLegendMessages(legendText, 1500);
+    const primaryWhatsappUrl = `https://wa.me/393497921890?text=${encodeURIComponent(legendMessages[0] || legendText)}`;
+
+    const persistShareIfLoggedIn = async (capturedBlob: Blob | null) => {
+      if (!user || resolvedChars.length === 0) return;
+      const currentKey = getConstellationSaveKey(resolvedChars, user.uid);
+      if (lastSavedConstellationKeyRef.current === currentKey) return;
+      try {
+        let screenshotUrl: string | undefined;
+        if (capturedBlob) {
+          screenshotUrl = await uploadConstellationBlob(capturedBlob);
+        }
+        const saved = await saveConstellation(resolvedChars, screenshotUrl);
+        if (saved) {
+          await fetchHistory(user.uid);
+        }
+      } catch (saveError) {
+        console.error('Errore salvataggio costellazione da condivisione:', saveError);
+      }
+    };
+
+    try {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const blob = await captureConstellationBlob();
+      const savePromise = persistShareIfLoggedIn(blob);
+
+      if (blob) {
+        const file = new File([blob], 'costellazione.png', { type: 'image/png' });
+
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: 'La mia Costellazione',
+              text: legendText,
+            });
+            await savePromise;
+            setShareLegendModal({ messages: legendMessages, fullText: legendText });
+            return;
+          } catch (shareError: any) {
+            if (shareError?.name === 'AbortError') {
+              await savePromise;
+              return;
+            }
+            console.log('Native share failed, falling back to download', shareError);
+          }
+        }
+
+        // Fallback senza navigator.share: download PNG + WhatsApp con testo legenda + modale
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'costellazione.png';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+
+        await savePromise;
+
+        setTimeout(() => {
+          window.open(primaryWhatsappUrl, '_blank');
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 500);
+        setShareLegendModal({ messages: legendMessages, fullText: legendText });
+      } else {
+        await savePromise;
+        window.open(primaryWhatsappUrl, '_blank');
+        setShareLegendModal({ messages: legendMessages, fullText: legendText });
+      }
+    } catch (error) {
+      console.error('Errore durante la condivisione:', error);
+      window.open(primaryWhatsappUrl, '_blank');
+      setShareLegendModal({ messages: legendMessages, fullText: legendText });
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleShare = () => {
+    promptPendingBeforeAction(executeShare);
   };
 
   const toggleFlowerSelection = (id: number) => {
@@ -1860,61 +2345,52 @@ export default function App() {
     doc.save("report-rune.pdf");
   };
 
-  const handleShare = async () => {
-    if (!boardRef.current || isSharing) return;
-    
-    setIsSharing(true);
-    
-    // Pre-open the window to avoid popup blockers
-    const whatsappUrl = `https://wa.me/393497921890?text=${encodeURIComponent('Ciao Graziamaria, ho generato una costellazione e ti invio lo screenshot ed il report. Grazie')}`;
-    
-    try {
-      // Small delay to ensure UI is ready
-      await new Promise(resolve => setTimeout(resolve, 100));
-      const blob = await captureConstellationBlob();
-      
-      if (blob) {
-        const file = new File([blob], 'costellazione.png', { type: 'image/png' });
-        
-        // Try native share first (works best on mobile)
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: 'La mia Costellazione',
-              text: 'Guarda la costellazione che ho creato!',
-            });
-            setIsSharing(false);
-            return;
-          } catch (shareError) {
-            console.log('Native share failed, falling back to download', shareError);
+  const buildWhatsAppLegendText = (chars: CharacterType[]): string => {
+    const resolved = resolveCharsWithStair(chars);
+    const nomeStr = (userData.nome || userProfile?.nome || user?.displayName || '').trim() || 'Cliente';
+    const etaStr = (userData.eta || userProfile?.eta || '').toString().trim();
+    const headerLine = `Costellazione di ${nomeStr}${etaStr ? `, ${etaStr}` : ''} — lettura dal punto di vista di Io`;
+
+    const ioChar = resolved.find(c => (c.label || '').trim().toLowerCase() === 'io');
+    const ioNormX = ioChar ? getCharacterNormalizedX(ioChar) : null;
+
+    const baseFigureLines = resolved.map((char) => {
+      const label = (char.label || 'Senza nome').trim() || 'Senza nome';
+      const stairText = char.stair === 'upper' ? 'Gradino superiore' : 'Gradino inferiore';
+      let ioPosText = 'Io non presente';
+      if (ioChar) {
+        if (char.id === ioChar.id) {
+          ioPosText = 'punto di riferimento (Io)';
+        } else if (ioNormX !== null) {
+          const diffNorm = getCharacterNormalizedX(char) - ioNormX;
+          if (Math.abs(diffNorm) < 0.04) {
+            ioPosText = 'in linea con Io';
+          } else if (diffNorm < 0) {
+            ioPosText = 'alla destra di Io';
+          } else {
+            ioPosText = 'alla sinistra di Io';
           }
         }
-
-        // Fallback: Download image
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'costellazione.png';
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        
-        // Short delay before opening WhatsApp to ensure download starts
-        setTimeout(() => {
-          window.open(whatsappUrl, '_blank');
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-        }, 500);
-      } else {
-        window.open(whatsappUrl, '_blank');
       }
-    } catch (error) {
-      console.error('Errore durante la condivisione:', error);
-      window.open(whatsappUrl, '_blank');
-    } finally {
-      setIsSharing(false);
+      const parts = [label, stairText, ioPosText];
+      if (char.feeling === 'piacevole') parts.push('emozione piacevole');
+      else if (char.feeling === 'spiacevole') parts.push('emozione spiacevole');
+      return parts.join(' · ');
+    });
+
+    const lines = [headerLine, ...baseFigureLines];
+    for (let i = 0; i < resolved.length; i += 1) {
+      const mem = (resolved[i].memory || '').trim();
+      if (!mem) continue;
+      const candidateLine = `${lines[i + 1]} · memoria: ${mem}`;
+      const nextLines = [...lines];
+      nextLines[i + 1] = candidateLine;
+      if (nextLines.join('\n').length <= 900) {
+        lines[i + 1] = candidateLine;
+      }
     }
+
+    return lines.join('\n');
   };
 
   const renderShape = (
@@ -1982,6 +2458,7 @@ export default function App() {
         {/* Piccolo numero leggibile sul corpo quando ci sono oltre 12 figure */}
         {typeof badgeNumber === 'number' && (
           <div
+            data-constellation-badge="true"
             className="absolute left-1/2 z-20 flex items-center justify-center rounded-full bg-white text-[#4a3f35] border border-[#5a5a40] font-bold shadow-sm leading-none pointer-events-none"
             style={{
               bottom: `${Math.max(2, (bodyHeight * finalScale) * (isFlat ? 0.34 : 0.46))}px`,
@@ -2118,7 +2595,7 @@ export default function App() {
                     <h3 className="font-bold uppercase tracking-[0.2em] text-[#c2b280] text-xs flex items-center gap-2">
                       <Share2 size={14} /> Costellazioni ricevute
                     </h3>
-                    <span className="text-[10px] opacity-50">{constellationReadings.length} totali</span>
+                    <span className="text-[10px] opacity-50">{constellationReadings.length} {constellationReadings.length === 1 ? 'totale' : 'totali'}</span>
                   </div>
                   <div className="space-y-3">
                     {constellationReadings.map(read => (
@@ -2144,112 +2621,15 @@ export default function App() {
                           >
                             <img src={read.screenshotUrl} alt="Costellazione del cliente" className="w-full max-h-[360px] object-contain" referrerPolicy="no-referrer" />
                           </button>
-                        ) : read.userData?.layoutVersion === 2 && Array.isArray(read.characters) && read.characters.length > 0 && (() => {
-                          const previewW = 560;
-                          const previewChars = read.characters as CharacterType[];
-                          const previewLegendMode = previewChars.length > 12;
-                          const previewDensity = getFigureDensityScale(previewChars.length);
-                          const previewPills = !previewLegendMode ? computePillLayout(previewChars, previewW) : null;
-                          return (
-                            <div className="mb-4 p-3 rounded-2xl border border-[#e5e0d8] bg-[#f8f5f0] overflow-x-auto">
-                              <div
-                                className="relative mx-auto flex flex-col"
-                                style={{
-                                  width: `${previewW}px`,
-                                  paddingTop: previewPills ? `${previewPills.topBandH}px` : undefined,
-                                  height: previewPills ? `${previewPills.totalH}px` : undefined
-                                }}
-                              >
-                                {previewPills && previewPills.pills.length > 0 && (
-                                  <svg
-                                    width={previewPills.stageW}
-                                    height={previewPills.totalH}
-                                    viewBox={`0 0 ${previewPills.stageW} ${previewPills.totalH}`}
-                                    className="absolute top-0 left-0 pointer-events-none z-20"
-                                    style={{ width: `${previewPills.stageW}px`, height: `${previewPills.totalH}px` }}
-                                  >
-                                    {previewPills.pills.map((pill) => (
-                                      <g key={`admin-wire-${read.id}-${pill.char.id}`}>
-                                        <line
-                                          x1={pill.centerX}
-                                          y1={pill.wireStartY}
-                                          x2={pill.figX}
-                                          y2={pill.figAnchorY}
-                                          stroke="#8a7954"
-                                          strokeWidth={1}
-                                          strokeLinecap="round"
-                                        />
-                                        <circle cx={pill.figX} cy={pill.figAnchorY} r={2} fill="#8a7954" />
-                                      </g>
-                                    ))}
-                                  </svg>
-                                )}
-                                <div className="relative w-full aspect-[16/9]">
-                                  <img
-                                    src={STAGE_IMAGE_URL}
-                                    alt="Gradini Costellazione"
-                                    className="relative z-10 w-full h-full object-contain pointer-events-none select-none"
-                                  />
-                                  {previewChars.map((character, idx) => {
-                                    const stair = getCharacterStairV2(character);
-                                    const normX = getCharacterNormalizedX(character);
-                                    const xPct = getStairXRatio(stair, normX) * 100;
-                                    const yPct = STAIR_GEOMETRY[stair].yRatio * 100;
-                                    return (
-                                      <div
-                                        key={`admin-fig-${read.id}-${idx}`}
-                                        className="absolute z-30"
-                                        style={{ left: `${xPct}%`, top: `${yPct}%`, width: 0, height: 0 }}
-                                      >
-                                        <div
-                                          className="absolute bottom-0 left-0 flex justify-center"
-                                          style={{ transform: 'translateX(-50%)' }}
-                                        >
-                                          {renderShape(
-                                            character.shape,
-                                            character.color,
-                                            'normal',
-                                            previewDensity,
-                                            previewLegendMode ? idx + 1 : undefined,
-                                            previewW
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                                {previewPills && previewPills.pills.map((pill) => {
-                                  const feelingBorder =
-                                    pill.char.feeling === 'piacevole'
-                                      ? '#4ade80'
-                                      : pill.char.feeling === 'spiacevole'
-                                        ? '#f87171'
-                                        : '#e5e0d8';
-                                  return (
-                                    <div
-                                      key={`admin-pill-${read.id}-${pill.char.id}`}
-                                      className="absolute z-40 px-2.5 bg-white rounded-full shadow-sm border font-medium whitespace-nowrap flex items-center justify-center text-[#4a3f35]"
-                                      style={{
-                                        left: `${pill.centerX}px`,
-                                        top: `${pill.pillTopY}px`,
-                                        height: `${pill.height}px`,
-                                        maxWidth: '170px',
-                                        fontSize: '11px',
-                                        borderColor: feelingBorder,
-                                        transform: 'translateX(-50%)'
-                                      }}
-                                    >
-                                      <span className="truncate">{pill.char.label}</span>
-                                      {pill.char.feeling && (
-                                        <span className="ml-1 shrink-0">{pill.char.feeling === 'piacevole' ? '❤️' : '💔'}</span>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        ) : read.userData?.layoutVersion === 2 && Array.isArray(read.characters) && read.characters.length > 0 && (
+                          <AdminConstellationPreview
+                            readId={read.id}
+                            characters={read.characters as CharacterType[]}
+                            renderFigure={(shape, color, densityScale, badgeNumber, previewWidth) =>
+                              renderShape(shape, color, 'normal', densityScale, badgeNumber, previewWidth)
+                            }
+                          />
+                        )}
                         {Array.isArray(read.characters) && read.characters.length > 12 && (
                           <div className="mb-4 p-3 rounded-2xl bg-[#fdfbf7] border border-[#e5e0d8]">
                             <p className="text-[9px] uppercase tracking-[0.2em] font-black text-[#c2b280] mb-2">
@@ -2927,7 +3307,7 @@ export default function App() {
                 <div className="flex gap-2">
                   <button 
                     onClick={() => setShowPicker(true)}
-                    disabled={showLabelInput || showPicker || workflowStep === 1}
+                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1}
                     className="flex items-center justify-center gap-2 bg-[#c2b280] text-white transition-all shadow-md hover:bg-[#b1a170] disabled:opacity-30 disabled:cursor-not-allowed px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                     translate="no"
                   >
@@ -2936,7 +3316,7 @@ export default function App() {
 
                   <button 
                     onClick={handleDraw}
-                    disabled={showLabelInput || showPicker || workflowStep === 1}
+                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1}
                     className="flex items-center justify-center gap-2 bg-[#e5e0d8] text-[#5a5a40] transition-all shadow-md hover:bg-[#d5d0c8] disabled:opacity-30 disabled:cursor-not-allowed px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                     translate="no"
                   >
@@ -2961,55 +3341,20 @@ export default function App() {
                 </button>
 
                 {/* Group: Actions */}
-                <div className="flex gap-2">
+                <div className="flex flex-wrap sm:flex-nowrap items-center justify-center gap-2 w-full sm:w-auto">
                   {workflowStep === 1 && (
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap sm:flex-nowrap items-center justify-center gap-2 w-full sm:w-auto">
                       <button 
                         onClick={generatePDF}
-                        className="flex items-center justify-center gap-2 bg-blue-600 text-white transition-all shadow-lg hover:bg-blue-700 px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
+                        className="flex items-center justify-center gap-2 bg-blue-600 text-white transition-all shadow-lg hover:bg-blue-700 w-full sm:w-auto px-4 sm:px-6 h-10 rounded-full text-[11px] sm:text-xs font-bold uppercase tracking-wider"
                         translate="no"
                       >
                         <FileText size={14} />
                         <span>Report</span>
                       </button>
                       <button 
-                        onClick={async () => {
-                          if (!user) { showAlert('Accesso richiesto', 'Effettua il login per salvare.'); return; }
-                          try {
-                            const resolvedChars = resolveCharsWithStair(characters);
-                            const currentKey = getConstellationSaveKey(resolvedChars, user.uid);
-                            if (lastSavedConstellationKeyRef.current === currentKey) {
-                              showAlert(
-                                'Costellazione salvata',
-                                lastSavedConstellationHasScreenshotRef.current
-                                  ? 'Costellazione salvata. L’immagine è stata inviata anche all’area admin.'
-                                  : 'Costellazione già salvata nell’area admin.'
-                              );
-                              return;
-                            }
-
-                            let screenshotUrl: string | undefined;
-                            try {
-                              screenshotUrl = await uploadConstellationScreenshot();
-                            } catch (screenshotError: any) {
-                              console.error('Errore generazione screenshot:', screenshotError?.message || screenshotError, screenshotError);
-                            }
-                            const saved = await saveConstellation(resolvedChars, screenshotUrl);
-                            if (saved) {
-                              await fetchHistory(user.uid);
-                              showAlert(
-                                'Costellazione salvata',
-                                screenshotUrl
-                                  ? 'Costellazione salvata. L’immagine è stata inviata anche all’area admin.'
-                                  : 'Costellazione salvata nell’area admin, ma lo screenshot automatico non è stato generato. Fai ora uno screenshot manuale del piano, poi allegalo e invialo separatamente su WhatsApp a Graziamaria insieme al report.'
-                              );
-                            }
-                          } catch (error: any) {
-                            console.error('Errore salvataggio costellazione:', error);
-                            showAlert('Errore salvataggio', `Impossibile salvare la costellazione. ${error?.message || 'Controlla il collegamento Firebase.'}`);
-                          }
-                        }}
-                        className="flex items-center justify-center gap-2 bg-[#c2b280] text-white transition-all shadow-lg hover:bg-[#b1a170] px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
+                        onClick={() => promptPendingBeforeAction(executeSaveAndSendConstellation)}
+                        className="flex items-center justify-center gap-2 bg-[#c2b280] text-white transition-all shadow-lg hover:bg-[#b1a170] w-full sm:w-auto px-4 sm:px-6 h-10 rounded-full text-[11px] sm:text-xs font-bold uppercase tracking-wider"
                         translate="no"
                       >
                         <Check size={14} />
@@ -3025,12 +3370,14 @@ export default function App() {
                         'Sei sicuro di voler svuotare il campo?',
                         () => {
                           setCharacters([]);
+                          setPendingCharacter(null);
+                          setIsDraggingPending(false);
                           setWorkflowStep(0);
                         },
                         { danger: true }
                       );
                     }}
-                    className="flex items-center justify-center gap-2 text-red-500 hover:bg-red-50 transition-colors border border-red-100 px-4 h-10 rounded-full"
+                    className="flex items-center justify-center gap-2 text-red-500 hover:bg-red-50 transition-colors border border-red-100 w-full sm:w-auto px-4 h-10 rounded-full"
                     title="Svuota Campo"
                     translate="no"
                   >
@@ -3063,6 +3410,150 @@ export default function App() {
 
                 return (
                   <div className="w-full max-w-[800px] mt-14 sm:mt-10 flex flex-col items-center select-none">
+                    {/* Area neutra per il pupazzo appena generato (fuori dai gradini, esclusa da screenshot/salvataggio/conteggio) */}
+                    {pendingCharacter && (
+                      <div
+                        ref={neutralAreaRef}
+                        data-constellation-neutral="true"
+                        className={`w-full max-w-xl mb-4 sm:mb-6 p-3 sm:p-4 rounded-2xl border-2 border-dashed border-[#c2b280] bg-[#fdfbf7] shadow-sm relative ${
+                          isDraggingPending ? 'z-[70]' : 'z-40'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[11px] sm:text-xs font-bold uppercase tracking-widest text-[#8a7954]">
+                              Pupazzo da posizionare
+                            </span>
+                            <span className="text-[11px] text-[#4a3f35]/70">
+                              Trascinalo sul gradino scelto
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPendingCharacter(null);
+                              setIsDraggingPending(false);
+                            }}
+                            className="p-1.5 rounded-full text-[#4a3f35]/60 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            aria-label="Rimuovi pupazzo da posizionare"
+                            title="Rimuovi pupazzo"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-5">
+                          <div className="relative flex items-center justify-center min-w-[96px] min-h-[112px] px-4 py-3 rounded-2xl bg-white ring-4 ring-[#c2b280]/45 shadow-[0_0_24px_rgba(194,178,128,0.55)]">
+                            <motion.div
+                              key={`pending-${pendingCharacter.id}-${pendingCharacter.snapSeq}`}
+                              drag
+                              dragMomentum={false}
+                              onDragStart={() => setIsDraggingPending(true)}
+                              onDragEnd={() => {
+                                setIsDraggingPending(false);
+                                const figEl = boardRef.current?.querySelector(`[data-pending-figure-id="${pendingCharacter.id}"]`) as HTMLElement | null;
+                                const stageEl = stageRef.current;
+                                if (!figEl || !stageEl) return;
+                                const figRect = figEl.getBoundingClientRect();
+                                const stageRect = stageEl.getBoundingClientRect();
+                                if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+                                const centerX = (figRect.left + figRect.right) / 2;
+                                const baseBottomY = figRect.bottom;
+                                const xRatio = (centerX - stageRect.left) / stageRect.width;
+                                const yRatio = (baseBottomY - stageRect.top) / stageRect.height;
+
+                                const dropPlacement = detectPendingDropStair(xRatio, yRatio);
+                                if (!dropPlacement) {
+                                  setPendingCharacter(prev => prev ? { ...prev, snapSeq: prev.snapSeq + 1 } : null);
+                                  return;
+                                }
+
+                                const nextDensityScale = getFigureDensityScale(characters.length + 1);
+                                const sameStairOthers = characters
+                                  .filter(other => getCharacterStairV2(other) === dropPlacement.stair)
+                                  .map(other => getCharacterNormalizedX(other));
+                                const finalNormalizedX = nudgeNormalizedXOnStair(
+                                  dropPlacement.stair,
+                                  dropPlacement.normalizedX,
+                                  sameStairOthers,
+                                  nextDensityScale
+                                );
+                                const finalX = Math.round(getStairXRatio(dropPlacement.stair, finalNormalizedX) * STAGE_REF_WIDTH);
+
+                                const newChar: CharacterType = {
+                                  id: pendingCharacter.id,
+                                  shape: pendingCharacter.shape,
+                                  color: pendingCharacter.color,
+                                  label: pendingCharacter.label.trim() || 'Sconosciuto',
+                                  x: finalX,
+                                  y: dropPlacement.y,
+                                  stair: dropPlacement.stair,
+                                  normalizedX: finalNormalizedX,
+                                  snapSeq: 0
+                                };
+                                setCharacters(prev => [...prev, newChar]);
+                                setPendingCharacter(null);
+                              }}
+                              className="cursor-grab active:cursor-grabbing relative flex items-end justify-center"
+                              style={{
+                                opacity: isDraggingPending ? 0.6 : 1,
+                                zIndex: isDraggingPending ? 80 : 50,
+                                touchAction: 'none',
+                                transition: 'opacity 120ms ease'
+                              }}
+                            >
+                              <div data-pending-figure-id={pendingCharacter.id} className="flex justify-center">
+                                {renderShape(
+                                  pendingCharacter.shape,
+                                  pendingCharacter.color,
+                                  'normal',
+                                  getFigureDensityScale(characters.length + 1)
+                                )}
+                              </div>
+                            </motion.div>
+                          </div>
+
+                          <div className="flex-1 w-full space-y-2 text-left">
+                            <label
+                              htmlFor="pending-character-label"
+                              className="block text-[10px] font-bold uppercase tracking-widest text-[#5a5a40]"
+                            >
+                              Nome / Ruolo del personaggio
+                            </label>
+                            <input
+                              id="pending-character-label"
+                              type="text"
+                              value={pendingCharacter.label}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPendingCharacter(prev => prev ? { ...prev, label: val } : null);
+                              }}
+                              placeholder="Chi rappresenta per te? (es. Mamma)"
+                              className="w-full px-3.5 py-2.5 bg-white border border-[#e5e0d8] rounded-xl text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280]"
+                            />
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                              {PREDEFINED_LABELS.slice(0, 8).map(label => (
+                                <button
+                                  key={`pending-preset-${label}`}
+                                  type="button"
+                                  onClick={() => setPendingCharacter(prev => prev ? { ...prev, label } : null)}
+                                  className={`px-2.5 py-1 text-[10px] sm:text-xs rounded-full border transition-colors ${
+                                    pendingCharacter.label === label
+                                      ? 'bg-[#c2b280] text-white border-[#c2b280]'
+                                      : 'bg-white hover:bg-[#f2ede4] text-[#4a3f35] border-[#e5e0d8]'
+                                  }`}
+                                  translate="no"
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Wrapper con bande pillole (<=12) + fili SVG 1px + stage 16:9 */}
                     <div
                       className="relative w-full flex flex-col"
@@ -3231,10 +3722,20 @@ export default function App() {
                               ? '#f87171'
                               : '#e5e0d8';
                         return (
-                          <button
+                          <div
                             key={`pill-${pill.char.id}`}
-                            type="button"
+                            role="button"
+                            tabIndex={0}
+                            data-constellation-pill="true"
+                            data-pill-center-x={pill.centerX}
+                            data-pill-width={pill.width}
                             onClick={() => handleCharacterClick(pill.char)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleCharacterClick(pill.char);
+                              }
+                            }}
                             className={`absolute z-40 px-2.5 bg-white rounded-full shadow-sm border font-medium whitespace-nowrap flex items-center justify-center text-[#4a3f35] ${
                               workflowStep === 1 && pill.char.label.toLowerCase() !== 'io'
                                 ? 'cursor-pointer hover:border-[#5a5a40]'
@@ -3243,7 +3744,11 @@ export default function App() {
                             style={{
                               left: `${pill.centerX}px`,
                               top: `${pill.pillTopY}px`,
-                              height: `${pill.height}px`,
+                              minHeight: `${pill.height}px`,
+                              height: 'auto',
+                              paddingTop: '4px',
+                              paddingBottom: '4px',
+                              lineHeight: 1.4,
                               maxWidth: stageWidth < 640 ? '160px' : '210px',
                               fontSize: stageWidth < 640 ? '11px' : '12px',
                               borderColor: feelingBorder,
@@ -3257,7 +3762,7 @@ export default function App() {
                                 {pill.char.feeling === 'piacevole' ? '❤️' : '💔'}
                               </span>
                             )}
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -3265,6 +3770,7 @@ export default function App() {
                     {/* Legenda multi-colonna sotto il piano quando ci sono oltre 12 figure */}
                     {useLegendMode && (
                       <div
+                        data-constellation-legend="true"
                         className="mt-4 w-full bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl px-4 py-3 shadow-sm text-[#4a3f35]"
                         translate="no"
                       >
@@ -3273,8 +3779,9 @@ export default function App() {
                             <button
                               key={`legend-${char.id}`}
                               type="button"
+                              data-constellation-legend-item="true"
                               onClick={() => handleCharacterClick(char)}
-                              className={`flex items-center gap-1.5 text-left truncate rounded-lg px-1.5 py-0.5 ${
+                              className={`flex items-center gap-1.5 text-left truncate rounded-lg px-1.5 py-1 ${
                                 workflowStep === 1 && char.label.toLowerCase() !== 'io'
                                   ? 'hover:bg-white cursor-pointer'
                                   : 'cursor-default'
@@ -3734,9 +4241,24 @@ export default function App() {
                   <div className="p-6 bg-[#fdfbf7] rounded-3xl border border-[#e5e0d8] text-center flex flex-col min-h-[300px]">
                     <Share2 className="mx-auto mb-4 text-[#c2b280]" size={24} />
                     <h4 className="font-bold text-xs uppercase tracking-widest mb-1">Costellazioni</h4>
-                    <div className="flex-1 space-y-2 mt-4 text-left overflow-y-auto max-h-[220px] scrollbar-hide pr-1">
+                    <div className="flex-1 space-y-2 mt-4 text-left overflow-y-auto max-h-[260px] scrollbar-hide pr-1">
                       {constellationHistory.map(ch => (
                           <div key={ch.id} className="p-3 bg-white rounded-xl border border-[#e5e0d8] text-[10px] shadow-sm notranslate">
+                            {ch.screenshotUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setFullscreenImageUrl(ch.screenshotUrl)}
+                                className="block w-full mb-2 rounded-lg overflow-hidden border border-[#e5e0d8] bg-[#f8f5f0] hover:opacity-90 transition-opacity"
+                                title="Apri costellazione a schermo intero"
+                              >
+                                <img
+                                  src={ch.screenshotUrl}
+                                  alt="Costellazione salvata"
+                                  className="w-full h-24 object-contain"
+                                  referrerPolicy="no-referrer"
+                                />
+                              </button>
+                            )}
                             <p className="font-bold text-[#c2b280]">{ch.timestamp?.toDate ? ch.timestamp.toDate().toLocaleDateString('it-IT') : 'Recente'}</p>
                             <p className="opacity-70">{ch.characters?.length || 0} Elementi posizionati</p>
                             {ch.characters && ch.characters.length > 0 && (
@@ -4749,6 +5271,117 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Post-share WhatsApp Legend Modal */}
+      <AnimatePresence>
+        {shareLegendModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShareLegendModal(null)}
+            className="fixed inset-0 z-[290] flex items-center justify-center bg-[#4a3f35]/40 backdrop-blur-md p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.92, y: 16 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, y: 16 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-2xl max-w-lg w-full border border-[#e5e0d8]"
+            >
+              <div className="flex justify-between items-start gap-4 mb-4">
+                <h3 className="text-xl sm:text-2xl font-serif italic text-[#4a3f35]">
+                  Legenda per Graziamaria
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShareLegendModal(null)}
+                  className="p-2 hover:bg-[#f8f5f0] rounded-full transition-colors text-[#4a3f35]"
+                  aria-label="Chiudi"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="text-xs text-[#4a3f35]/70 mb-3 leading-relaxed">
+                Immagine pronta. Puoi inviare subito anche il riepilogo scritto della costellazione su WhatsApp:
+              </p>
+              <div className="max-h-56 overflow-y-auto p-3 rounded-2xl bg-[#fdfbf7] border border-[#e5e0d8] text-xs text-[#4a3f35] whitespace-pre-line leading-relaxed mb-5">
+                {shareLegendModal.fullText}
+              </div>
+              <div className="flex flex-col gap-2.5">
+                {shareLegendModal.messages.length === 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const waUrl = `https://wa.me/393497921890?text=${encodeURIComponent(shareLegendModal.messages[0])}`;
+                      window.open(waUrl, '_blank');
+                    }}
+                    className="w-full py-3 px-5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#25D366] text-white hover:bg-[#128C7E] shadow-lg transition-all flex items-center justify-center gap-2"
+                  >
+                    <MessageCircle size={16} />
+                    <span>Invia anche la legenda scritta</span>
+                  </button>
+                ) : (
+                  shareLegendModal.messages.map((msg, idx) => (
+                    <button
+                      key={`wa-chunk-${idx}`}
+                      type="button"
+                      onClick={() => {
+                        const waUrl = `https://wa.me/393497921890?text=${encodeURIComponent(msg)}`;
+                        window.open(waUrl, '_blank');
+                      }}
+                      className="w-full py-3 px-5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#25D366] text-white hover:bg-[#128C7E] shadow-lg transition-all flex items-center justify-center gap-2"
+                    >
+                      <MessageCircle size={16} />
+                      <span>
+                        {idx === 0
+                          ? `Invia anche la legenda scritta (1/${shareLegendModal.messages.length})`
+                          : `Invia parte ${idx + 1}/${shareLegendModal.messages.length} su WhatsApp`}
+                      </span>
+                    </button>
+                  ))
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShareLegendModal(null)}
+                  className="w-full py-2.5 px-5 rounded-full text-xs font-bold uppercase tracking-wider border border-[#e5e0d8] text-[#4a3f35] hover:bg-[#f8f5f0] transition-all"
+                >
+                  Chiudi
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Fullscreen Image Lightbox Modal */}
+      <AnimatePresence>
+        {fullscreenImageUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setFullscreenImageUrl(null)}
+            className="fixed inset-0 z-[320] flex items-center justify-center bg-black/85 p-4"
+          >
+            <button
+              type="button"
+              onClick={() => setFullscreenImageUrl(null)}
+              className="absolute top-4 right-4 p-3 rounded-full bg-white/90 text-[#4a3f35] hover:bg-white shadow-lg transition-all"
+              aria-label="Chiudi immagine"
+            >
+              <X size={20} />
+            </button>
+            <img
+              src={fullscreenImageUrl}
+              alt="Costellazione a schermo intero"
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-full max-h-[90vh] object-contain rounded-2xl bg-[#f8f5f0] shadow-2xl"
+              referrerPolicy="no-referrer"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* In-App Alert & Confirm Dialog Modal */}
       <AnimatePresence>
         {appDialog && (
@@ -4793,10 +5426,14 @@ export default function App() {
                   <>
                     <button
                       type="button"
-                      onClick={() => setAppDialog(null)}
+                      onClick={async () => {
+                        const cancelAction = appDialog.onCancel;
+                        setAppDialog(null);
+                        if (cancelAction) await cancelAction();
+                      }}
                       className="px-5 py-2.5 rounded-full text-xs font-bold uppercase tracking-wider border border-[#e5e0d8] text-[#4a3f35] hover:bg-[#f8f5f0] transition-all"
                     >
-                      Annulla
+                      {appDialog.cancelLabel || 'Annulla'}
                     </button>
                     <button
                       type="button"
@@ -4811,7 +5448,7 @@ export default function App() {
                           : 'bg-[#c2b280] hover:bg-[#b1a170]'
                       }`}
                     >
-                      Conferma
+                      {appDialog.confirmLabel || 'Conferma'}
                     </button>
                   </>
                 ) : (
