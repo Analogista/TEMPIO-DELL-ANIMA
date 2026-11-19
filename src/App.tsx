@@ -141,7 +141,30 @@ const PREDEFINED_LABELS = [
   "Partner", "Figlio", "Figlia", "Amico", "Lavoro", "Paura", "Sogno"
 ];
 
-type PositionCharacter = Pick<CharacterType, 'id' | 'x' | 'y' | 'stair' | 'memory'>;
+type PositionCharacter = Pick<CharacterType, 'id' | 'label' | 'x' | 'y' | 'stair' | 'memory'>;
+
+const BOARD_REFERENCE_WIDTH = 658;
+
+function detectStairFromElements(
+  figureEl: HTMLElement | null,
+  stageEl: HTMLElement | null,
+  fallbackY: number
+): 'upper' | 'lower' {
+  if (figureEl && stageEl) {
+    const figRect = figureEl.getBoundingClientRect();
+    const stageRect = stageEl.getBoundingClientRect();
+    if (stageRect.width > 0 && stageRect.height > 0 && figRect.height > 0) {
+      const centerX = (figRect.left + figRect.right) / 2;
+      const baseY = figRect.bottom;
+      const xRatio = Math.min(1, Math.max(0, (centerX - stageRect.left) / stageRect.width));
+      const yRatio = (baseY - stageRect.top) / stageRect.height;
+      // Front edge between upper step and lower step in 000gradini.webp
+      const boundaryYRatio = 0.44 + 0.14 * xRatio;
+      return yRatio <= boundaryYRatio ? 'upper' : 'lower';
+    }
+  }
+  return fallbackY < -80 ? 'upper' : 'lower';
+}
 
 function resolveCharacterStair(character: PositionCharacter) {
   if (character.stair === 'upper' || character.stair === 'lower') {
@@ -156,22 +179,18 @@ function resolveCharacterStair(character: PositionCharacter) {
     return { value: 'lower' as const, method: 'estimated' as const };
   }
 
-  // Legacy fallback: the original visual board has no explicit stair field.
-  // Keep this visibly marked as estimated and retain the raw coordinates below.
+  // Ripiego legacy: stima verticale quando il campo stair non era ancora salvato.
   return {
     value: character.y < -80 ? 'upper' as const : 'lower' as const,
     method: 'estimated' as const
   };
 }
 
-function describeHorizontalPosition(index: number, total: number) {
-  const ratio = total <= 1 ? 0.5 : index / (total - 1);
-  if (ratio < 0.15) return 'estrema sinistra';
-  if (ratio < 0.35) return 'sinistra';
-  if (ratio < 0.5) return 'centro-sinistra';
-  if (ratio <= 0.65) return 'centro';
-  if (ratio <= 0.85) return 'destra';
-  return 'estrema destra';
+function describeProximityBand(distancePx: number): 'vicino' | 'media' | 'lontano' {
+  const ratio = distancePx / BOARD_REFERENCE_WIDTH;
+  if (ratio <= 0.14) return 'vicino';
+  if (ratio <= 0.30) return 'media';
+  return 'lontano';
 }
 
 function describeCharacterPosition(characters: PositionCharacter[], targetId: string) {
@@ -179,30 +198,269 @@ function describeCharacterPosition(characters: PositionCharacter[], targetId: st
   if (!target) return null;
 
   const targetStair = resolveCharacterStair(target);
+  const stairLabel = targetStair.value === 'upper' ? 'Gradino superiore' : 'Gradino inferiore';
   const sameStair = characters
     .filter(character => resolveCharacterStair(character).value === targetStair.value)
-    .sort((a, b) => a.x - b.x);
+    .sort((a, b) => a.x - b.x || a.y - b.y || a.id.localeCompare(b.id));
   const zeroBasedIndex = sameStair.findIndex(character => character.id === targetId);
   if (zeroBasedIndex < 0) return null;
 
+  if (sameStair.length === 1) {
+    return {
+      stair: stairLabel,
+      summary: `${stairLabel} · unica sul gradino`,
+      method: targetStair.method
+    };
+  }
+
+  const orderText = `${zeroBasedIndex + 1}º da sinistra su ${sameStair.length}`;
+  const others = sameStair.filter(character => character.id !== targetId);
+  const overlapped = others.filter(
+    other => Math.abs(other.x - target.x) < 28 && Math.abs(other.y - target.y) < 45
+  );
+
+  const leftNeighbor = zeroBasedIndex > 0 ? sameStair[zeroBasedIndex - 1] : null;
+  const rightNeighbor = zeroBasedIndex < sameStair.length - 1 ? sameStair[zeroBasedIndex + 1] : null;
+  const minDistance = Math.min(...others.map(other => Math.abs(other.x - target.x)));
+  const proximity = describeProximityBand(minDistance);
+
+  const parts: string[] = [stairLabel, orderText];
+
+  if (overlapped.length > 0) {
+    const names = overlapped.map(item => item.label || 'Senza nome').join(', ');
+    parts.push(`sovrapposta a ${names}`);
+  } else {
+    const neighborParts: string[] = [];
+    if (leftNeighbor) neighborParts.push(`${leftNeighbor.label || 'Senza nome'} (a sinistra)`);
+    if (rightNeighbor) neighborParts.push(`${rightNeighbor.label || 'Senza nome'} (a destra)`);
+    if (neighborParts.length > 0) {
+      parts.push(`accanto a ${neighborParts.join(' e ')}`);
+    }
+    parts.push(`vicinanza: ${proximity}`);
+  }
+
   return {
-    stair: targetStair.value === 'upper' ? 'superiore' : 'inferiore',
-    position: `${zeroBasedIndex + 1} di ${sameStair.length}`,
-    horizontal: describeHorizontalPosition(zeroBasedIndex, sameStair.length),
+    stair: stairLabel,
+    summary: parts.join(' · '),
     method: targetStair.method
   };
 }
 
+function getFigureHeight(shape: CharacterType['shape']): number {
+  switch (shape) {
+    case 'conical-large':
+    case 'cylindrical-large':
+      return 107;
+    case 'conical-medium':
+    case 'cylindrical-medium':
+      return 88;
+    case 'cylindrical-small':
+      return 69;
+    case 'flat-large':
+      return 80;
+    case 'flat-medium':
+      return 64;
+    case 'block':
+      return 24;
+    default:
+      return 88;
+  }
+}
+
+function computeLabelOffsets(characters: CharacterType[]): Record<string, number> {
+  const LABEL_HEIGHT = 24;
+  const LABEL_STEP = 24;
+  const H_PADDING = 8;
+  const V_PADDING = 2;
+
+  const sorted = [...characters].sort((a, b) => a.x - b.x || a.y - b.y || a.id.localeCompare(b.id));
+  const placed: { left: number; right: number; top: number; bottom: number }[] = [];
+  const offsets: Record<string, number> = {};
+  let collisionCounter = 0;
+
+  for (const char of sorted) {
+    const labelLen = (char.label || '').length;
+    const width = Math.max(58, labelLen * 7.5 + 28 + (char.feeling ? 22 : 0));
+    const figureW = Math.max(width, 48);
+    const centerX = char.x + figureW / 2;
+    const left = centerX - width / 2 - H_PADDING;
+    const right = centerX + width / 2 + H_PADDING;
+    const baseTop = char.y + getFigureHeight(char.shape) + 8;
+
+    const overlapsAt = (dy: number) => {
+      const top = baseTop + dy - V_PADDING;
+      const bottom = baseTop + dy + LABEL_HEIGHT + V_PADDING;
+      return placed.some(
+        box => left < box.right && right > box.left && top < box.bottom && bottom > box.top
+      );
+    };
+
+    let chosenOffset = 0;
+    if (overlapsAt(0)) {
+      collisionCounter += 1;
+      const preferUp = collisionCounter % 2 === 0;
+      const candidates = preferUp
+        ? [-LABEL_STEP, LABEL_STEP, -LABEL_STEP * 2, LABEL_STEP * 2, -LABEL_STEP * 3, LABEL_STEP * 3, -LABEL_STEP * 4, LABEL_STEP * 4]
+        : [LABEL_STEP, -LABEL_STEP, LABEL_STEP * 2, -LABEL_STEP * 2, LABEL_STEP * 3, -LABEL_STEP * 3, LABEL_STEP * 4, -LABEL_STEP * 4];
+      const available = candidates.find(candidate => !overlapsAt(candidate));
+      chosenOffset = available !== undefined ? available : LABEL_STEP * collisionCounter;
+    }
+
+    offsets[char.id] = chosenOffset;
+    placed.push({
+      left,
+      right,
+      top: baseTop + chosenOffset,
+      bottom: baseTop + chosenOffset + LABEL_HEIGHT
+    });
+  }
+
+  return offsets;
+}
+
+function getReadingTimestampMillis(read: any): number {
+  if (read?.timestamp?.toMillis) return read.timestamp.toMillis();
+  if (read?.timestamp?.seconds) return read.timestamp.seconds * 1000;
+  return 0;
+}
+
+function getConstellationPositionsSignature(read: any): string {
+  const chars = Array.isArray(read?.characters) ? read.characters : [];
+  const normalized = chars
+    .map((c: any) => ({
+      shape: c.shape || '',
+      color: c.color || '',
+      label: c.label || '',
+      x: Math.round(Number(c.x) || 0),
+      y: Math.round(Number(c.y) || 0)
+    }))
+    .sort((a: any, b: any) =>
+      `${a.label}|${a.shape}|${a.x}|${a.y}`.localeCompare(`${b.label}|${b.shape}|${b.x}|${b.y}`)
+    );
+  return JSON.stringify(normalized);
+}
+
+function getDeduplicatedReadings(readings: any[]): any[] {
+  const sorted = [...readings].sort((a, b) => getReadingTimestampMillis(b) - getReadingTimestampMillis(a));
+  const kept: any[] = [];
+
+  for (const read of sorted) {
+    const ownerKey = read.userId || read.userEmail || 'unknown';
+    const type = read.type;
+
+    if (type === 'rune' || type === 'flower') {
+      const ids: number[] = Array.isArray(type === 'rune' ? read.runeIds : read.flowerIds)
+        ? (type === 'rune' ? read.runeIds : read.flowerIds)
+        : [];
+      const isSubsetOfNewer = kept.some(newer => {
+        if ((newer.userId || newer.userEmail || 'unknown') !== ownerKey || newer.type !== type) {
+          return false;
+        }
+        const newerIds: number[] = Array.isArray(type === 'rune' ? newer.runeIds : newer.flowerIds)
+          ? (type === 'rune' ? newer.runeIds : newer.flowerIds)
+          : [];
+        if (ids.length === 0) return true;
+        return ids.every(id => newerIds.includes(id));
+      });
+      if (!isSubsetOfNewer) {
+        kept.push(read);
+      }
+    } else if (type === 'constellation') {
+      const sig = getConstellationPositionsSignature(read);
+      const isDuplicateNewer = kept.some(newer =>
+        (newer.userId || newer.userEmail || 'unknown') === ownerKey &&
+        newer.type === 'constellation' &&
+        getConstellationPositionsSignature(newer) === sig
+      );
+      if (!isDuplicateNewer) {
+        kept.push(read);
+      }
+    } else {
+      kept.push(read);
+    }
+  }
+
+  return kept;
+}
+
+function replaceBalancedCssFunction(css: string, fnName: string, replacer: (fullMatch: string) => string): string {
+  const needle = `${fnName}(`;
+  const lower = css.toLowerCase();
+  let result = '';
+  let i = 0;
+
+  while (i < css.length) {
+    const idx = lower.indexOf(needle, i);
+    if (idx === -1) {
+      result += css.slice(i);
+      break;
+    }
+    result += css.slice(i, idx);
+    let depth = 1;
+    let j = idx + needle.length;
+    while (j < css.length && depth > 0) {
+      if (css[j] === '(') depth += 1;
+      else if (css[j] === ')') depth -= 1;
+      j += 1;
+    }
+    const fullMatch = css.slice(idx, j);
+    result += replacer(fullMatch);
+    i = j;
+  }
+
+  return result;
+}
+
+function sanitizeCssText(cssText: string): string {
+  let sanitized = cssText;
+  sanitized = replaceBalancedCssFunction(sanitized, 'color-mix', match =>
+    /white|#fff/i.test(match) ? 'rgba(255, 255, 255, 0.88)' : 'rgba(74, 63, 53, 0.2)'
+  );
+  for (const fn of ['oklab', 'oklch', 'lab', 'lch', 'light-dark']) {
+    sanitized = replaceBalancedCssFunction(sanitized, fn, () => '#777777');
+  }
+  sanitized = sanitized.replace(/\bin\s+(?:oklab|oklch|lab|lch)(?:\s+(?:shorter|longer|increasing|decreasing)\s+hue)?\b/gi, '');
+  return sanitized;
+}
+
 function sanitizeCanvasClone(clonedDoc: Document) {
-  // Tailwind may emit color-mix/in oklab; html2canvas cannot parse it yet.
-  clonedDoc.querySelectorAll('style').forEach(styleElement => {
-    styleElement.textContent = (styleElement.textContent || '')
-      .replace(/color-mix\([^;{}]*\)/gi, 'rgba(0, 0, 0, 0.35)')
-      .replace(/(?:oklab|oklch|lab|lch)\([^)]*\)/gi, '#777777');
+  // Flatten same-origin stylesheets (including Vite-bundled <link rel="stylesheet">)
+  // and strip unsupported CSS color functions (oklab, oklch, lab, lch, color-mix, gradient color-spaces).
+  const collectedCss: string[] = [];
+  Array.from(document.styleSheets).forEach(sheet => {
+    try {
+      const rules = sheet.cssRules;
+      if (rules) {
+        const text = Array.from(rules).map(rule => rule.cssText).join('\n');
+        collectedCss.push(sanitizeCssText(text));
+      }
+    } catch {
+      // Cross-origin stylesheet (e.g., Google Fonts) - leave untouched
+    }
   });
 
-  const fallbackFor = (property: string) => {
+  if (collectedCss.length > 0) {
+    clonedDoc.querySelectorAll('style').forEach(styleElement => {
+      styleElement.remove();
+    });
+    clonedDoc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+      const href = link.getAttribute('href') || '';
+      if (!href.startsWith('http') || href.startsWith(window.location.origin)) {
+        link.remove();
+      }
+    });
+    const combinedStyle = clonedDoc.createElement('style');
+    combinedStyle.textContent = collectedCss.join('\n');
+    clonedDoc.head.appendChild(combinedStyle);
+  } else {
+    clonedDoc.querySelectorAll('style').forEach(styleElement => {
+      styleElement.textContent = sanitizeCssText(styleElement.textContent || '');
+    });
+  }
+
+  const fallbackFor = (property: string, currentValue: string) => {
     if (property.includes('shadow')) return 'none';
+    if (property === 'background-image') return sanitizeCssText(currentValue);
     if (property.includes('background')) return 'transparent';
     if (property.includes('border') || property.includes('outline')) return '#e5e0d8';
     if (property === 'color' || property.includes('text')) return '#4a3f35';
@@ -211,13 +469,17 @@ function sanitizeCanvasClone(clonedDoc: Document) {
   };
 
   clonedDoc.querySelectorAll<HTMLElement>('*').forEach(element => {
+    if (element.style) {
+      element.style.backdropFilter = 'none';
+      (element.style as any).webkitBackdropFilter = 'none';
+    }
     const computed = clonedDoc.defaultView?.getComputedStyle(element);
     if (!computed) return;
     for (let index = 0; index < computed.length; index += 1) {
       const property = computed.item(index);
       const value = computed.getPropertyValue(property);
-      if (/oklab|color-mix/i.test(value)) {
-        element.style.setProperty(property, fallbackFor(property), 'important');
+      if (/(?:oklab|oklch|color-mix|light-dark|\blab|\blch)\(|\bin\s+(?:oklab|oklch|lab|lch)\b/i.test(value)) {
+        element.style?.setProperty(property, fallbackFor(property, value), 'important');
       }
     }
   });
@@ -225,6 +487,73 @@ function sanitizeCanvasClone(clonedDoc: Document) {
   const safeStyle = clonedDoc.createElement('style');
   safeStyle.textContent = `*::before, *::after { border-color: #e5e0d8 !important; box-shadow: none !important; }`;
   clonedDoc.head.appendChild(safeStyle);
+}
+
+async function waitForBoardImages(container: HTMLElement): Promise<void> {
+  const images = Array.from(container.querySelectorAll('img'));
+  await Promise.all(
+    images.map(async img => {
+      if (!img.complete) {
+        await new Promise<void>(resolve => {
+          const done = () => resolve();
+          img.addEventListener('load', done, { once: true });
+          img.addEventListener('error', done, { once: true });
+        });
+      }
+      if (typeof img.decode === 'function') {
+        try {
+          await img.decode();
+        } catch {
+          // Ignore decode warnings if image is already rasterized
+        }
+      }
+    })
+  );
+}
+
+const INITIAL_USER_DATA = {
+  nome: '',
+  eta: '',
+  sesso: '',
+  domandaRune: ''
+};
+
+const INITIAL_CANDIDACY_FORM = {
+  nome: '',
+  email: '',
+  telefono: '',
+  eta: '',
+  citta: '',
+  puntoRottura: '',
+  radiceTempo: 'meno_mese',
+  termometroUrgenza: 5,
+  obiettivoProfondo: 'sollievo',
+  pattoFiducia: false,
+  rispettoSpazioSacro: false,
+  portaleVisivo: false,
+  message: '',
+};
+
+function clearBrowserCandidacyData() {
+  if (typeof window === 'undefined') return;
+  const clearMatchingKeys = (store: Storage | undefined) => {
+    if (!store) return;
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < store.length; i += 1) {
+        const key = store.key(i);
+        if (!key || key.startsWith('firebase:')) continue;
+        if (/candidac|form|bozza|tempio|userData/i.test(key)) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => store.removeItem(key));
+    } catch {
+      // Ignore storage access errors in restricted contexts
+    }
+  };
+  clearMatchingKeys(window.localStorage);
+  clearMatchingKeys(window.sessionStorage);
 }
 
 export default function App() {
@@ -239,12 +568,7 @@ export default function App() {
   const [analyzingCharacter, setAnalyzingCharacter] = useState<CharacterType | null>(null);
   const [tempMemory, setTempMemory] = useState('');
   const [tempFeeling, setTempFeeling] = useState<'piacevole' | 'spiacevole' | null>(null);
-  const [userData, setUserData] = useState({
-    nome: '',
-    eta: '',
-    sesso: '',
-    domandaRune: ''
-  });
+  const [userData, setUserData] = useState({ ...INITIAL_USER_DATA });
   const [currentPage, setCurrentPage] = useState<'home' | 'costellazioni' | 'fiori' | 'rune' | 'percorsi' | 'profile' | 'admin'>('home');
   const [adminData, setAdminData] = useState<{ candidacies: any[], readings: any[] }>({ candidacies: [], readings: [] });
   const [selectedCandidacies, setSelectedCandidacies] = useState<string[]>([]);
@@ -254,21 +578,7 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showCandidacyModal, setShowCandidacyModal] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<'standard' | 'complex' | null>(null);
-  const [candidacyForm, setCandidacyForm] = useState({
-    nome: '',
-    email: '',
-    telefono: '',
-    eta: '',
-    citta: '',
-    puntoRottura: '',
-    radiceTempo: 'meno_mese',
-    termometroUrgenza: 5,
-    obiettivoProfondo: 'sollievo',
-    pattoFiducia: false,
-    rispettoSpazioSacro: false,
-    portaleVisivo: false,
-    message: '',
-  });
+  const [candidacyForm, setCandidacyForm] = useState({ ...INITIAL_CANDIDACY_FORM });
   const [candidacyFiles, setCandidacyFiles] = useState<File[]>([]);
   const [isSubmittingCandidacy, setIsSubmittingCandidacy] = useState(false);
   const [userCandidacies, setUserCandidacies] = useState<any[]>([]);
@@ -405,41 +715,106 @@ export default function App() {
     }
   };
 
+  const previousUidRef = useRef<string | null>(null);
+  const lastSavedRuneKeyRef = useRef<string | null>(null);
+  const lastSavedFlowerKeyRef = useRef<string | null>(null);
+  const lastSavedConstellationKeyRef = useRef<string | null>(null);
+  const lastSavedConstellationHasScreenshotRef = useRef<boolean>(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
+
+  const resetSessionState = (options?: { navigateHome?: boolean }) => {
+    setUserProfile(null);
+    setUserCandidacies([]);
+    setRuneHistory([]);
+    setFlowerHistory([]);
+    setConstellationHistory([]);
+    setAdminData({ candidacies: [], readings: [] });
+    setSelectedCandidacies([]);
+    setIsAdminLoading(false);
+    setSelectedRunesIds([]);
+    setCurrentRune(null);
+    setSelectedFlowersIds([]);
+    setSelectedFlower(null);
+    setFlowerSearch('');
+    setCharacters([]);
+    setDrawingCharacter(null);
+    setTempLabel('');
+    setShowLabelInput(false);
+    setShowPicker(false);
+    setIsSharing(false);
+    setWorkflowStep(0);
+    setShowWorkflowModal(false);
+    setAnalyzingCharacter(null);
+    setTempMemory('');
+    setTempFeeling(null);
+    setCandidacyForm({ ...INITIAL_CANDIDACY_FORM });
+    setCandidacyFiles([]);
+    setIsSubmittingCandidacy(false);
+    setShowCandidacyModal(false);
+    setSubmissionResult(null);
+    setUserData({ ...INITIAL_USER_DATA });
+    lastSavedRuneKeyRef.current = null;
+    lastSavedFlowerKeyRef.current = null;
+    lastSavedConstellationKeyRef.current = null;
+    lastSavedConstellationHasScreenshotRef.current = false;
+    clearBrowserCandidacyData();
+    if (options?.navigateHome) {
+      setCurrentPage('home');
+      if (typeof window !== 'undefined') {
+        window.scrollTo(0, 0);
+      }
+    }
+  };
+
   // Auth State Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        fetchHistory(u.uid);
-        // Create/Update public profile
-        const profileRef = doc(db, 'users', u.uid, 'profile', 'data');
-        try {
-          const profileDoc = await getDoc(profileRef);
-          if (!profileDoc.exists()) {
-            await setDoc(profileRef, {
-              nome: u.displayName || 'Utente',
-              email: u.email,
-              updatedAt: serverTimestamp()
-            });
-          }
-        } catch (error) {
-          console.error("Error updating profile:", error);
-        }
+      const prevUid = previousUidRef.current;
 
-        // Fetch User Candidacies
-        try {
-          const q = query(
-            collection(db, 'users', u.uid, 'candidacies'),
-            orderBy('createdAt', 'desc')
-          );
-          const snapshot = await getDocs(q);
-          const candidacies = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-          setUserCandidacies(candidacies);
-        } catch (e) {
-          console.error("Error fetching candidacies:", e);
+      if (!u) {
+        previousUidRef.current = null;
+        setUser(null);
+        if (prevUid !== null) {
+          resetSessionState({ navigateHome: true });
+        } else {
+          setUserCandidacies([]);
         }
-      } else {
-        setUserCandidacies([]);
+        return;
+      }
+
+      if (prevUid !== null && prevUid !== u.uid) {
+        resetSessionState({ navigateHome: true });
+      }
+      previousUidRef.current = u.uid;
+      setUser(u);
+
+      fetchHistory(u.uid);
+      // Create/Update public profile
+      const profileRef = doc(db, 'users', u.uid, 'profile', 'data');
+      try {
+        const profileDoc = await getDoc(profileRef);
+        if (!profileDoc.exists()) {
+          await setDoc(profileRef, {
+            nome: u.displayName || 'Utente',
+            email: u.email,
+            updatedAt: serverTimestamp()
+          });
+        }
+      } catch (error) {
+        console.error("Error updating profile:", error);
+      }
+
+      // Fetch User Candidacies
+      try {
+        const q = query(
+          collection(db, 'users', u.uid, 'candidacies'),
+          orderBy('createdAt', 'desc')
+        );
+        const snapshot = await getDocs(q);
+        const candidacies = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        setUserCandidacies(candidacies);
+      } catch (e) {
+        console.error("Error fetching candidacies:", e);
       }
     });
     return () => unsubscribe();
@@ -457,9 +832,15 @@ export default function App() {
     }
   };
 
-  const logout = () => signOut(auth);
-
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const logout = async () => {
+    try {
+      await signOut(auth);
+    } finally {
+      previousUidRef.current = null;
+      setUser(null);
+      resetSessionState({ navigateHome: true });
+    }
+  };
 
   // Load user profile
   useEffect(() => {
@@ -477,16 +858,20 @@ export default function App() {
             eta: profile.eta || prev.eta
           }));
           // Sync candidacy form with profile if form is empty
-          if (!candidacyForm.nome && profile.nome) {
-            setCandidacyForm(prev => ({
-              ...prev,
-              nome: profile.nome,
-              email: profile.email || user.email,
-              telefono: profile.telefono || '',
-              eta: profile.eta,
-              citta: profile.citta,
-              puntoRottura: profile.puntoRottura
-            }));
+          if (profile.nome) {
+            setCandidacyForm(prev => (
+              !prev.nome
+                ? {
+                    ...prev,
+                    nome: profile.nome,
+                    email: profile.email || user.email || '',
+                    telefono: profile.telefono || '',
+                    eta: profile.eta || '',
+                    citta: profile.citta || '',
+                    puntoRottura: profile.puntoRottura || ''
+                  }
+                : prev
+            ));
           }
         }
       } catch (e) {
@@ -496,21 +881,44 @@ export default function App() {
     loadProfile();
   }, [user]);
 
+  const getConstellationSaveKey = (chars: CharacterType[], uid: string) => {
+    const normalized = chars.map(c => ({
+      id: c.id,
+      shape: c.shape,
+      color: c.color,
+      label: c.label,
+      x: Math.round(c.x),
+      y: Math.round(c.y),
+      stair: c.stair || null,
+      feeling: c.feeling || null,
+      memory: c.memory || ''
+    }));
+    return JSON.stringify({ uid, chars: normalized });
+  };
+
   const saveRuneReading = async (question: string, runeIds: number[]) => {
     if (!user) return;
+    const key = JSON.stringify({
+      uid: user.uid,
+      question: (question || '').trim(),
+      ids: [...runeIds].sort((a, b) => a - b)
+    });
+    if (lastSavedRuneKeyRef.current === key) return;
+
     try {
       const selectedRunesNames = RUNES.filter(r => runeIds.includes(r.id)).map(r => r.name);
       const dataToSave = {
         question,
         runeIds,
         runeNames: selectedRunesNames,
-        userName: userProfile?.nome || user.displayName,
-        userEmail: user.email,
+        userName: (userProfile?.nome || user.displayName || '').slice(0, 100),
+        userEmail: user.email || '',
         timestamp: serverTimestamp()
       };
       await addDoc(collection(db, 'users', user.uid, 'runeReadings'), dataToSave);
       // Global collection for Admin
       await addDoc(collection(db, 'allReadings'), { ...dataToSave, type: 'rune', userId: user.uid });
+      lastSavedRuneKeyRef.current = key;
     } catch (e) {
       handleFirestoreError(e, 'create', `users/${user.uid}/runeReadings`);
     }
@@ -518,17 +926,24 @@ export default function App() {
 
   const saveFlowerReading = async (flowerIds: number[]) => {
     if (!user) return;
+    const key = JSON.stringify({
+      uid: user.uid,
+      ids: [...flowerIds].sort((a, b) => a - b)
+    });
+    if (lastSavedFlowerKeyRef.current === key) return;
+
     try {
       const selectedFlowerNames = BACH_FLOWERS.filter(f => flowerIds.includes(f.id)).map(f => f.name);
       const dataToSave = {
         flowerIds,
         flowerNames: selectedFlowerNames,
-        userName: userProfile?.nome || user.displayName,
-        userEmail: user.email,
+        userName: (userProfile?.nome || user.displayName || '').slice(0, 100),
+        userEmail: user.email || '',
         timestamp: serverTimestamp()
       };
       await addDoc(collection(db, 'users', user.uid, 'flowerReadings'), dataToSave);
       await addDoc(collection(db, 'allReadings'), { ...dataToSave, type: 'flower', userId: user.uid });
+      lastSavedFlowerKeyRef.current = key;
     } catch (e) {
       handleFirestoreError(e, 'create', `users/${user.uid}/flowerReadings`);
     }
@@ -536,40 +951,72 @@ export default function App() {
 
   const captureConstellationBlob = async () => {
     if (!boardRef.current) return null;
-    const { default: html2canvas } = await import('html2canvas');
-    const canvas = await html2canvas(boardRef.current, {
-      backgroundColor: '#f8f5f0',
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      allowTaint: true,
-      onclone: (clonedDoc) => {
-        sanitizeCanvasClone(clonedDoc);
-        const shareBtn = clonedDoc.querySelector('[title="Invia a Graziamaria"]');
-        if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
-        const main = clonedDoc.querySelector('main');
-        if (main) {
-          main.style.perspective = 'none';
-          main.style.overflow = 'visible';
+    try {
+      await waitForBoardImages(boardRef.current);
+      const { default: html2canvas } = await import('html2canvas');
+      const canvas = await html2canvas(boardRef.current, {
+        backgroundColor: '#f8f5f0',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        onclone: (clonedDoc) => {
+          sanitizeCanvasClone(clonedDoc);
+          const shareBtn = clonedDoc.querySelector('[title="Invia a Graziamaria"]');
+          if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
+          const main = clonedDoc.querySelector('main');
+          if (main) {
+            main.style.perspective = 'none';
+            main.style.overflow = 'visible';
+          }
+          const stage = clonedDoc.querySelector<HTMLElement>('[data-constellation-stage="true"]');
+          if (stage) {
+            stage.style.transform = 'none';
+            stage.style.transformStyle = 'flat';
+            stage.style.perspective = 'none';
+          }
         }
-      }
-    });
-    return new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png', 0.9));
+      });
+      return await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png', 0.9));
+    } catch (error: any) {
+      console.error('[captureConstellationBlob] Errore completo:', error?.message || error, error);
+      throw error;
+    }
   };
 
   const uploadConstellationScreenshot = async () => {
     if (!user) throw new Error('Utente non autenticato.');
-    const blob = await captureConstellationBlob();
-    if (!blob) throw new Error('Impossibile generare l’immagine della costellazione.');
-    const screenshotRef = ref(storage, `constellations/${user.uid}/${crypto.randomUUID()}_costellazione.png`);
-    await uploadBytes(screenshotRef, blob, { contentType: 'image/png' });
-    return getDownloadURL(screenshotRef);
+    try {
+      const blob = await captureConstellationBlob();
+      if (!blob) throw new Error('Impossibile generare l’immagine della costellazione (blob nullo).');
+      const screenshotRef = ref(storage, `constellations/${user.uid}/${crypto.randomUUID()}_costellazione.png`);
+      await uploadBytes(screenshotRef, blob, { contentType: 'image/png' });
+      return await getDownloadURL(screenshotRef);
+    } catch (error: any) {
+      console.error('[uploadConstellationScreenshot] Errore completo:', error?.message || error, error);
+      throw error;
+    }
   };
+
+  const resolveCharsWithStair = (chars: CharacterType[]): CharacterType[] =>
+    chars.map(char => {
+      if (char.stair === 'upper' || char.stair === 'lower') return char;
+      const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${char.id}"]`) as HTMLElement | null;
+      return {
+        ...char,
+        stair: detectStairFromElements(figEl, stageRef.current, char.y)
+      };
+    });
 
   const saveConstellation = async (chars: CharacterType[], screenshotUrl?: string) => {
     if (!user || chars.length === 0) return false;
+    const resolvedChars = resolveCharsWithStair(chars);
+    const key = getConstellationSaveKey(resolvedChars, user.uid);
+    if (lastSavedConstellationKeyRef.current === key) {
+      return true;
+    }
+
     try {
-      const savedCharacters = chars.map(({ id, shape, color, label, x, y, stair, feeling, memory }) => ({
+      const savedCharacters = resolvedChars.map(({ id, shape, color, label, x, y, stair, feeling, memory }) => ({
         id,
         shape,
         color,
@@ -585,8 +1032,8 @@ export default function App() {
         characters: savedCharacters,
         labels: characterLabels,
         ...(screenshotUrl ? { screenshotUrl } : {}),
-        userName: userProfile?.nome || user.displayName,
-        userEmail: user.email,
+        userName: (userProfile?.nome || user.displayName || '').slice(0, 100),
+        userEmail: user.email || '',
         timestamp: serverTimestamp()
       };
       const personalRef = doc(collection(db, 'users', user.uid, 'constellations'));
@@ -595,6 +1042,8 @@ export default function App() {
       batch.set(personalRef, dataToSave);
       batch.set(globalRef, { ...dataToSave, type: 'constellation', userId: user.uid });
       await batch.commit();
+      lastSavedConstellationKeyRef.current = key;
+      lastSavedConstellationHasScreenshotRef.current = Boolean(screenshotUrl);
       return true;
     } catch (e) {
       handleFirestoreError(e, 'create', `users/${user.uid}/constellations`);
@@ -701,19 +1150,7 @@ export default function App() {
       alert("Candidatura salvata! Ora si aprirà WhatsApp per inviare la notifica a Graziamaria. Lei ti risponderà direttamente su WhatsApp.");
       
       // Reset form but keep modal open for result screen
-      setCandidacyForm({ 
-        nome: '', 
-        email: '', 
-        telefono: '',
-        puntoRottura: '',
-        radiceTempo: 'meno_mese',
-        termometroUrgenza: 5,
-        obiettivoProfondo: 'sollievo',
-        pattoFiducia: false,
-        rispettoSpazioSacro: false,
-        portaleVisivo: false,
-        message: '' 
-      });
+      setCandidacyForm({ ...INITIAL_CANDIDACY_FORM });
       setCandidacyFiles([]);
     } catch (e: any) {
       console.error("Full Candidacy Submission Error:", e);
@@ -735,6 +1172,7 @@ export default function App() {
     return matchesSearch;
   });
   const boardRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
 
   const handleDraw = () => {
     const randomShape = CHARACTER_SHAPES[Math.floor(Math.random() * CHARACTER_SHAPES.length)];
@@ -756,19 +1194,32 @@ export default function App() {
 
   const confirmCharacter = () => {
     if (!drawingCharacter) return;
-    
+
+    const newId = Math.random().toString(36).substr(2, 9);
+    const initialStair = detectStairFromElements(null, stageRef.current, 0);
     const newChar: CharacterType = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: newId,
       shape: drawingCharacter.shape as any,
       color: drawingCharacter.color,
       label: tempLabel || "Sconosciuto",
       x: 0,
       y: 0, // Appear at the center of the board, between the platforms
+      stair: initialStair,
     };
 
-    setCharacters([...characters, newChar]);
+    setCharacters(prev => [...prev, newChar]);
     setDrawingCharacter(null);
     setShowLabelInput(false);
+
+    // Dopo l'animazione iniziale (scale 0 -> 1), misura il gradino reale su cui poggia la figura
+    setTimeout(() => {
+      const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${newId}"]`) as HTMLElement | null;
+      if (!figEl) return;
+      const detectedStair = detectStairFromElements(figEl, stageRef.current, 0);
+      setCharacters(prev => prev.map(c =>
+        c.id === newId && c.x === 0 && c.y === 0 ? { ...c, stair: detectedStair } : c
+      ));
+    }, 380);
   };
 
   const removeCharacter = (id: string) => {
@@ -843,7 +1294,6 @@ export default function App() {
     });
     
     doc.save("report-costellazione.pdf");
-    saveConstellation(characters);
   };
 
   const toggleFlowerSelection = (id: number) => {
@@ -895,7 +1345,6 @@ export default function App() {
     doc.text(footerText, 20, yPos);
     
     doc.save("report-fiori-bach.pdf");
-    saveFlowerReading(selectedFlowersIds);
   };
 
   const generateRunePDF = async () => {
@@ -954,7 +1403,6 @@ export default function App() {
     doc.text(footerText, 20, yPos);
     
     doc.save("report-rune.pdf");
-    saveRuneReading(userData.domandaRune, selectedRunesIds);
   };
 
   const handleShare = async () => {
@@ -968,30 +1416,7 @@ export default function App() {
     try {
       // Small delay to ensure UI is ready
       await new Promise(resolve => setTimeout(resolve, 100));
-
-      const { default: html2canvas } = await import('html2canvas');
-      const canvas = await html2canvas(boardRef.current, {
-        backgroundColor: '#f8f5f0',
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        allowTaint: true,
-        // Ensure we capture the 3D transformed elements as best as possible
-        onclone: (clonedDoc) => {
-          sanitizeCanvasClone(clonedDoc);
-          const shareBtn = clonedDoc.querySelector('[title="Invia su WhatsApp"]');
-          if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
-          
-          // Force some styles for better capture
-          const main = clonedDoc.querySelector('main');
-          if (main) {
-            main.style.perspective = 'none';
-            main.style.overflow = 'visible';
-          }
-        }
-      });
-      
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png', 0.9));
+      const blob = await captureConstellationBlob();
       
       if (blob) {
         const file = new File([blob], 'costellazione.png', { type: 'image/png' });
@@ -1200,6 +1625,10 @@ export default function App() {
                 </div>
               </div>
 
+              {(() => {
+                const deduplicatedReadings = getDeduplicatedReadings(adminData.readings);
+                const constellationReadings = deduplicatedReadings.filter(read => read.type === 'constellation');
+                return (
               <div className="grid grid-cols-1 gap-8">
                 {/* Stats */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
@@ -1211,7 +1640,7 @@ export default function App() {
                   <div className="bg-[#f8f5f0] p-6 rounded-3xl border border-[#e5e0d8] text-center">
                     <Sparkles className="mx-auto mb-2 text-[#c2b280]" size={20} />
                     <p className="text-[10px] uppercase tracking-widest opacity-60 font-bold mb-1">Analisi Effettuate</p>
-                    <p className="text-3xl font-serif italic text-[#c2b280]">{adminData.readings.length}</p>
+                    <p className="text-3xl font-serif italic text-[#c2b280]">{deduplicatedReadings.length}</p>
                   </div>
                   <div className="bg-[#f8f5f0] p-6 rounded-3xl border border-[#e5e0d8] text-center col-span-2 flex flex-col justify-center">
                     <Info className="mx-auto mb-2 text-[#c2b280]" size={20} />
@@ -1226,10 +1655,10 @@ export default function App() {
                     <h3 className="font-bold uppercase tracking-[0.2em] text-[#c2b280] text-xs flex items-center gap-2">
                       <Share2 size={14} /> Costellazioni ricevute
                     </h3>
-                    <span className="text-[10px] opacity-50">{adminData.readings.filter(read => read.type === 'constellation').length} totali</span>
+                    <span className="text-[10px] opacity-50">{constellationReadings.length} totali</span>
                   </div>
                   <div className="space-y-3">
-                    {adminData.readings.filter(read => read.type === 'constellation').map(read => (
+                    {constellationReadings.map(read => (
                       <div key={`standalone-${read.id}`} className="p-5 bg-white rounded-2xl border border-[#e5e0d8] shadow-sm">
                         <div className="flex flex-wrap justify-between gap-2 mb-3">
                           <div>
@@ -1259,7 +1688,8 @@ export default function App() {
                             return (
                               <div key={`${read.id}-standalone-${index}`} className="p-3 rounded-xl bg-[#fdfbf7] border border-[#e5e0d8] text-[10px]">
                                 <p className="font-bold text-[#4a3f35]">{character.label || 'Senza nome'}</p>
-                                <p className="opacity-70">{position ? `${position.stair} · ${position.position} · ${position.horizontal}` : 'Posizione non determinata'}</p>
+                                <p className="opacity-70">{position ? position.summary : 'Posizione non determinata'}</p>
+                                <p className="opacity-50">Coordinate tecniche: {Math.round(character.x)}, {Math.round(character.y)}{position?.method === 'estimated' ? ' · gradino stimato' : ''}</p>
                                 {character.feeling && <p className="opacity-60">Emozione: {character.feeling}</p>}
                                 {character.memory && <p className="opacity-60 italic">Memoria: {character.memory}</p>}
                               </div>
@@ -1268,7 +1698,7 @@ export default function App() {
                         </div>
                       </div>
                     ))}
-                    {adminData.readings.filter(read => read.type === 'constellation').length === 0 && (
+                    {constellationReadings.length === 0 && (
                       <p className="text-[10px] opacity-40 italic text-center py-4">Nessuna costellazione ricevuta.</p>
                     )}
                   </div>
@@ -1298,7 +1728,7 @@ export default function App() {
 
                   <div className="space-y-6">
                     {adminData.candidacies.map(can => {
-                      const userReadings = adminData.readings.filter(r => r.userEmail === can.email || r.userId === can.userId);
+                      const userReadings = deduplicatedReadings.filter(r => r.userEmail === can.email || r.userId === can.userId);
                       const isSelected = selectedCandidacies.includes(can.id);
 
                       return (
@@ -1436,7 +1866,7 @@ export default function App() {
                               {/* Inline Histroy */}
                               <div className="space-y-4">
                                 <h5 className="text-[10px] uppercase tracking-[0.3em] font-black text-[#c2b280]">Cronologia Letture Cliente</h5>
-                                <div className="space-y-3 max-h-[160px] overflow-y-auto pr-2 scrollbar-style">
+                                <div className="space-y-3 max-h-[480px] overflow-y-auto pr-2 scrollbar-style">
                                   {userReadings.map(read => (
                                     <div key={read.id} className="p-4 bg-[#f8f5f0] rounded-2xl border border-[#e5e0d8] group/read">
                                       <div className="flex justify-between items-center mb-2">
@@ -1472,7 +1902,7 @@ export default function App() {
                                                   const position = describeCharacterPosition(read.characters as PositionCharacter[], character.id);
                                                   return position ? (
                                                     <>
-                                                      <span className="block text-[#5a5a40]">{position.stair} · {position.position} · {position.horizontal}</span>
+                                                      <span className="block text-[#5a5a40]">{position.summary}</span>
                                                       <span className="block opacity-50">Coordinate tecniche: {Math.round(character.x)}, {Math.round(character.y)}{position.method === 'estimated' ? ' · gradino stimato' : ''}</span>
                                                     </>
                                                   ) : null;
@@ -1484,8 +1914,8 @@ export default function App() {
                                       ) : (
                                         <div className="text-[10px] font-medium opacity-70 leading-relaxed">
                                           {Array.isArray(read.data) ? read.data.join(', ') :
-                                           read.runeIds ? `Rune: ${read.runeIds.map((id: number) => RUNES.find(r => r.id === id)?.name).filter(Boolean).join(', ')}` :
-                                           read.flowerIds ? `Fiori: ${read.flowerIds.map((id: number) => BACH_FLOWERS.find(f => f.id === id)?.name).filter(Boolean).join(', ')}` : 'Analisi Complessa'}
+                                           read.runeIds ? `Rune: ${(Array.isArray(read.runeNames) && read.runeNames.length > 0 ? read.runeNames : read.runeIds.map((id: number) => RUNES.find(r => r.id === id)?.name).filter(Boolean)).join(', ')}` :
+                                           read.flowerIds || read.flowerNames ? `Fiori: ${(Array.isArray(read.flowerNames) && read.flowerNames.length > 0 ? read.flowerNames : read.flowerIds.map((id: number) => BACH_FLOWERS.find(f => f.id === id)?.name).filter(Boolean)).join(', ')}` : 'Analisi Complessa'}
                                         </div>
                                       )}
                                     </div>
@@ -1528,6 +1958,8 @@ export default function App() {
                   </div>
                 </div>
               </div>
+                );
+              })()}
             </div>
           </motion.div>
         ) : currentPage === 'home' ? (
@@ -1905,13 +2337,22 @@ export default function App() {
                         onClick={async () => {
                           if (!user) { alert("Effettua il login per salvare."); return; }
                           try {
+                            const resolvedChars = resolveCharsWithStair(characters);
+                            const currentKey = getConstellationSaveKey(resolvedChars, user.uid);
+                            if (lastSavedConstellationKeyRef.current === currentKey) {
+                              alert(lastSavedConstellationHasScreenshotRef.current
+                                ? "Costellazione salvata. L’immagine è stata inviata anche all’area admin."
+                                : "Costellazione già salvata nell’area admin.");
+                              return;
+                            }
+
                             let screenshotUrl: string | undefined;
                             try {
                               screenshotUrl = await uploadConstellationScreenshot();
-                            } catch (screenshotError) {
-                              console.error('Errore generazione screenshot:', screenshotError);
+                            } catch (screenshotError: any) {
+                              console.error('Errore generazione screenshot:', screenshotError?.message || screenshotError, screenshotError);
                             }
-                            const saved = await saveConstellation(characters, screenshotUrl);
+                            const saved = await saveConstellation(resolvedChars, screenshotUrl);
                             if (saved) {
                               await fetchHistory(user.uid);
                               alert(screenshotUrl
@@ -1967,6 +2408,8 @@ export default function App() {
 
               {/* Stage / Board */}
               <div 
+                ref={stageRef}
+                data-constellation-stage="true"
                 className="relative w-[329px] h-[184px] sm:w-[658px] sm:h-[368px] transition-transform duration-700 mt-12 sm:mt-0"
                 style={{ 
                   transform: 'rotateX(25deg)',
@@ -1986,52 +2429,65 @@ export default function App() {
               <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white/80 to-transparent pointer-events-none z-0" />
 
               {/* Draggable Characters */}
-              {characters.map((char) => (
-                <motion.div
-                  key={char.id}
-                  drag={workflowStep === 0 || char.label.toLowerCase() === 'io'}
-                  dragMomentum={false}
-                  initial={{ x: char.x, y: char.y, scale: 0 }}
-                  animate={{ scale: 1 }}
-                  onDragEnd={(_, info) => {
-                    setCharacters(prev => prev.map(c => 
-                      c.id === char.id ? { ...c, x: c.x + info.offset.x, y: c.y + info.offset.y } : c
-                    ));
-                  }}
-                  onClick={() => handleCharacterClick(char)}
-                  className={`absolute z-40 group ${
-                    (workflowStep === 0 || char.label.toLowerCase() === 'io') 
-                      ? 'cursor-grab active:cursor-grabbing' 
-                      : workflowStep === 1 
-                        ? 'cursor-pointer hover:ring-2 hover:ring-[#5a5a40] rounded-full transition-all' 
-                        : ''
-                  }`}
-                  style={{ left: '50%', top: '50%' }}
-                >
-                  <div className="flex flex-col items-center">
-                    {renderShape(char.shape, char.color)}
-                    <div className={`mt-2 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-full shadow-sm border border-[#e5e0d8] text-xs font-medium whitespace-nowrap ${char.feeling === 'piacevole' ? 'border-green-400' : char.feeling === 'spiacevole' ? 'border-red-400' : ''}`} translate="no">
-                      {char.label}
-                      {char.feeling && (
-                        <span className="ml-1">
-                          {char.feeling === 'piacevole' ? '❤️' : '💔'}
-                        </span>
+              {(() => {
+                const labelOffsets = computeLabelOffsets(characters);
+                return characters.map((char) => (
+                  <motion.div
+                    key={char.id}
+                    drag={workflowStep === 0 || char.label.toLowerCase() === 'io'}
+                    dragMomentum={false}
+                    initial={{ x: char.x, y: char.y, scale: 0 }}
+                    animate={{ scale: 1 }}
+                    onDragEnd={(_, info) => {
+                      const nextX = char.x + info.offset.x;
+                      const nextY = char.y + info.offset.y;
+                      const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${char.id}"]`) as HTMLElement | null;
+                      const detectedStair = detectStairFromElements(figEl, stageRef.current, nextY);
+                      setCharacters(prev => prev.map(c => 
+                        c.id === char.id ? { ...c, x: nextX, y: nextY, stair: detectedStair } : c
+                      ));
+                    }}
+                    onClick={() => handleCharacterClick(char)}
+                    className={`absolute z-40 group ${
+                      (workflowStep === 0 || char.label.toLowerCase() === 'io') 
+                        ? 'cursor-grab active:cursor-grabbing' 
+                        : workflowStep === 1 
+                          ? 'cursor-pointer hover:ring-2 hover:ring-[#5a5a40] rounded-full transition-all' 
+                          : ''
+                    }`}
+                    style={{ left: '50%', top: '50%' }}
+                  >
+                    <div className="flex flex-col items-center">
+                      <div data-char-figure-id={char.id}>
+                        {renderShape(char.shape, char.color)}
+                      </div>
+                      <div
+                        className={`mt-2 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-full shadow-sm border border-[#e5e0d8] text-xs font-medium whitespace-nowrap ${char.feeling === 'piacevole' ? 'border-green-400' : char.feeling === 'spiacevole' ? 'border-red-400' : ''}`}
+                        style={{ position: 'relative', top: `${labelOffsets[char.id] || 0}px` }}
+                        translate="no"
+                      >
+                        {char.label}
+                        {char.feeling && (
+                          <span className="ml-1">
+                            {char.feeling === 'piacevole' ? '❤️' : '💔'}
+                          </span>
+                        )}
+                      </div>
+                      {workflowStep === 0 && (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeCharacter(char.id);
+                          }}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                        >
+                          <X size={12} />
+                        </button>
                       )}
                     </div>
-                    {workflowStep === 0 && (
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeCharacter(char.id);
-                        }}
-                        className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                ));
+              })()}
             </main>
           </motion.div>
         ) : currentPage === 'rune' ? (
@@ -2361,7 +2817,7 @@ export default function App() {
               </section>
             </main>
           </motion.div>
-        ) : currentPage === 'profile' ? (
+        ) : currentPage === 'profile' && user ? (
           <motion.div 
             key="profile"
             initial={{ opacity: 0, scale: 0.95 }}
