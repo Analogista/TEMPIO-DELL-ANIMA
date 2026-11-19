@@ -618,6 +618,27 @@ export default function App() {
   const [runeHistory, setRuneHistory] = useState<any[]>([]);
   const [flowerHistory, setFlowerHistory] = useState<any[]>([]);
   const [constellationHistory, setConstellationHistory] = useState<any[]>([]);
+  const [appDialog, setAppDialog] = useState<{
+    mode: 'alert' | 'confirm';
+    title: string;
+    message: string;
+    danger?: boolean;
+    onConfirm?: () => void | Promise<void>;
+    onClose?: () => void | Promise<void>;
+  } | null>(null);
+
+  const showAlert = (title: string, message: string, onClose?: () => void | Promise<void>) => {
+    setAppDialog({ mode: 'alert', title, message, onClose });
+  };
+
+  const showConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void | Promise<void>,
+    options?: { danger?: boolean }
+  ) => {
+    setAppDialog({ mode: 'confirm', title, message, danger: options?.danger, onConfirm });
+  };
 
   const openCandidacyModal = () => {
     const prefilled = {
@@ -686,90 +707,107 @@ export default function App() {
       }));
     } catch (e) {
       console.error("Error updating note:", e);
-      alert("Errore nel salvataggio della nota.");
+      showAlert('Errore salvataggio', 'Errore nel salvataggio della nota.');
     }
   };
 
-  const deleteCandidacy = async (id: string) => {
-    if (!confirm("Sei sicuro di voler eliminare questa candidatura?")) return;
-    try {
-      await deleteDoc(doc(db, 'candidacies', id));
-      setAdminData(prev => ({
-        ...prev,
-        candidacies: prev.candidacies.filter(c => c.id !== id)
-      }));
-      setSelectedCandidacies(prev => prev.filter(sid => sid !== id));
-    } catch (e) {
-      console.error("Error deleting candidacy:", e);
-      alert("Errore nell'eliminazione.");
-    }
+  const deleteCandidacy = (id: string) => {
+    showConfirm(
+      'Elimina candidatura',
+      'Sei sicuro di voler eliminare questa candidatura?',
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'candidacies', id));
+          setAdminData(prev => ({
+            ...prev,
+            candidacies: prev.candidacies.filter(c => c.id !== id)
+          }));
+          setSelectedCandidacies(prev => prev.filter(sid => sid !== id));
+        } catch (e) {
+          console.error("Error deleting candidacy:", e);
+          showAlert('Errore eliminazione', "Errore nell'eliminazione.");
+        }
+      },
+      { danger: true }
+    );
   };
 
-  const deleteReading = async (reading: any) => {
+  const deleteReading = (reading: any) => {
     const groupToDelete = getReadingDeletionGroup(reading, adminData.readings);
     const deleteCount = groupToDelete.length;
     const confirmMessage = deleteCount > 1
       ? `Verranno eliminate ${deleteCount} letture dall’area admin (inclusi i doppioni e i salvataggi parziali associati). L’operazione non può essere annullata.`
       : 'Verrà eliminata 1 lettura dall’area admin. L’operazione non può essere annullata.';
 
-    if (!confirm(confirmMessage)) return;
-    try {
-      const screenshotUrls = Array.from(
-        new Set(
-          groupToDelete
-            .map(item => item.screenshotUrl)
-            .filter((url): url is string => typeof url === 'string' && url.length > 0)
-        )
-      );
-
-      for (const screenshotUrl of screenshotUrls) {
+    showConfirm(
+      'Elimina lettura',
+      confirmMessage,
+      async () => {
         try {
-          await deleteObject(ref(storage, screenshotUrl));
-        } catch (storageError) {
-          console.warn('Screenshot già assente o non eliminabile:', storageError);
+          const screenshotUrls = Array.from(
+            new Set(
+              groupToDelete
+                .map(item => item.screenshotUrl)
+                .filter((url): url is string => typeof url === 'string' && url.length > 0)
+            )
+          );
+
+          for (const screenshotUrl of screenshotUrls) {
+            try {
+              await deleteObject(ref(storage, screenshotUrl));
+            } catch (storageError) {
+              console.warn('Screenshot già assente o non eliminabile:', storageError);
+            }
+          }
+
+          for (let i = 0; i < groupToDelete.length; i += 450) {
+            const chunk = groupToDelete.slice(i, i + 450);
+            const batch = writeBatch(db);
+            chunk.forEach(item => {
+              batch.delete(doc(db, 'allReadings', item.id));
+            });
+            await batch.commit();
+          }
+
+          const deletedIds = new Set(groupToDelete.map(item => item.id));
+          setAdminData(prev => ({
+            ...prev,
+            readings: prev.readings.filter(item => !deletedIds.has(item.id))
+          }));
+        } catch (error) {
+          console.error('Errore eliminazione lettura:', error);
+          showAlert('Errore eliminazione', 'Non è stato possibile eliminare la lettura dall’area admin.');
         }
-      }
-
-      for (let i = 0; i < groupToDelete.length; i += 450) {
-        const chunk = groupToDelete.slice(i, i + 450);
-        const batch = writeBatch(db);
-        chunk.forEach(item => {
-          batch.delete(doc(db, 'allReadings', item.id));
-        });
-        await batch.commit();
-      }
-
-      const deletedIds = new Set(groupToDelete.map(item => item.id));
-      setAdminData(prev => ({
-        ...prev,
-        readings: prev.readings.filter(item => !deletedIds.has(item.id))
-      }));
-    } catch (error) {
-      console.error('Errore eliminazione lettura:', error);
-      alert('Non è stato possibile eliminare la lettura dall’area admin.');
-    }
+      },
+      { danger: true }
+    );
   };
 
-  const bulkDeleteCandidacies = async () => {
+  const bulkDeleteCandidacies = () => {
     if (selectedCandidacies.length === 0) return;
-    if (!confirm(`Sei sicuro di voler eliminare ${selectedCandidacies.length} candidature?`)) return;
-    
-    try {
-      const batch = writeBatch(db);
-      selectedCandidacies.forEach(id => {
-        batch.delete(doc(db, 'candidacies', id));
-      });
-      await batch.commit();
-      
-      setAdminData(prev => ({
-        ...prev,
-        candidacies: prev.candidacies.filter(c => !selectedCandidacies.includes(c.id))
-      }));
-      setSelectedCandidacies([]);
-    } catch (e) {
-      console.error("Error bulk deleting:", e);
-      alert("Errore nell'eliminazione multipla.");
-    }
+    showConfirm(
+      'Elimina candidature selezionate',
+      `Sei sicuro di voler eliminare ${selectedCandidacies.length} candidature?`,
+      async () => {
+        try {
+          const batch = writeBatch(db);
+          selectedCandidacies.forEach(id => {
+            batch.delete(doc(db, 'candidacies', id));
+          });
+          await batch.commit();
+          
+          setAdminData(prev => ({
+            ...prev,
+            candidacies: prev.candidacies.filter(c => !selectedCandidacies.includes(c.id))
+          }));
+          setSelectedCandidacies([]);
+        } catch (e) {
+          console.error("Error bulk deleting:", e);
+          showAlert('Errore eliminazione', "Errore nell'eliminazione multipla.");
+        }
+      },
+      { danger: true }
+    );
   };
 
   const previousUidRef = useRef<string | null>(null);
@@ -809,6 +847,7 @@ export default function App() {
     setIsSubmittingCandidacy(false);
     setShowCandidacyModal(false);
     setSubmissionResult(null);
+    setAppDialog(null);
     setUserData({ ...INITIAL_USER_DATA });
     lastSavedRuneKeyRef.current = null;
     lastSavedFlowerKeyRef.current = null;
@@ -1109,8 +1148,7 @@ export default function App() {
 
   const submitCandidacy = async () => {
     if (!user) {
-      alert("Per favore, effettua l'accesso per candidarti.");
-      login();
+      showAlert('Accesso richiesto', "Per favore, effettua l'accesso per candidarti.", login);
       return;
     }
 
@@ -1130,17 +1168,17 @@ export default function App() {
     }
 
     if (!candidacyForm.nome || !candidacyForm.email || !candidacyForm.telefono || !candidacyForm.puntoRottura) {
-      alert("Nome, Email, Telefono e Descrizione del fastidio sono obbligatori.");
+      showAlert('Campi obbligatori', 'Nome, Email, Telefono e Descrizione del fastidio sono obbligatori.');
       return;
     }
 
     if (!candidacyForm.pattoFiducia || !candidacyForm.rispettoSpazioSacro || !candidacyForm.portaleVisivo) {
-      alert("Per favore, accetta i patti di fiducia e conferma la disponibilità delle foto per procedere.");
+      showAlert('Conferma richiesta', 'Per favore, accetta i patti di fiducia e conferma la disponibilità delle foto per procedere.');
       return;
     }
 
     if (profilePhotoUrls.length + candidacyFiles.length < 2) {
-      alert("Per favore, carica almeno 2 foto della pianta dei tuoi piedi (sinistro e destro) per procedere.");
+      showAlert('Foto richieste', 'Per favore, carica almeno 2 foto della pianta dei tuoi piedi (sinistro e destro) per procedere.');
       return;
     }
 
@@ -1204,14 +1242,14 @@ export default function App() {
         window.open(whatsappUrl, '_blank');
       }, 1500);
       
-      alert("Candidatura salvata! Ora si aprirà WhatsApp per inviare la notifica a Graziamaria. Lei ti risponderà direttamente su WhatsApp.");
+      showAlert('Candidatura salvata', 'Candidatura salvata! Ora si aprirà WhatsApp per inviare la notifica a Graziamaria. Lei ti risponderà direttamente su WhatsApp.');
       
       // Reset form but keep modal open for result screen
       setCandidacyForm({ ...INITIAL_CANDIDACY_FORM });
       setCandidacyFiles([]);
     } catch (e: any) {
       console.error("Full Candidacy Submission Error:", e);
-      alert(e.message || "Errore durante l'invio della candidatura. Assicurati che lo Storage sia attivo nella console Firebase.");
+      showAlert('Errore candidatura', e.message || "Errore durante l'invio della candidatura. Assicurati che lo Storage sia attivo nella console Firebase.");
     } finally {
       setIsSubmittingCandidacy(false);
     }
@@ -2063,8 +2101,7 @@ export default function App() {
                   <button 
                     onClick={() => {
                       if (!user) {
-                        alert("Per favore, effettua l'accesso per candidarti.");
-                        login();
+                        showAlert('Accesso richiesto', "Per favore, effettua l'accesso per candidarti.", login);
                       } else {
                         openCandidacyModal();
                       }
@@ -2392,14 +2429,17 @@ export default function App() {
                       </button>
                       <button 
                         onClick={async () => {
-                          if (!user) { alert("Effettua il login per salvare."); return; }
+                          if (!user) { showAlert('Accesso richiesto', 'Effettua il login per salvare.'); return; }
                           try {
                             const resolvedChars = resolveCharsWithStair(characters);
                             const currentKey = getConstellationSaveKey(resolvedChars, user.uid);
                             if (lastSavedConstellationKeyRef.current === currentKey) {
-                              alert(lastSavedConstellationHasScreenshotRef.current
-                                ? "Costellazione salvata. L’immagine è stata inviata anche all’area admin."
-                                : "Costellazione già salvata nell’area admin.");
+                              showAlert(
+                                'Costellazione salvata',
+                                lastSavedConstellationHasScreenshotRef.current
+                                  ? 'Costellazione salvata. L’immagine è stata inviata anche all’area admin.'
+                                  : 'Costellazione già salvata nell’area admin.'
+                              );
                               return;
                             }
 
@@ -2412,13 +2452,16 @@ export default function App() {
                             const saved = await saveConstellation(resolvedChars, screenshotUrl);
                             if (saved) {
                               await fetchHistory(user.uid);
-                              alert(screenshotUrl
-                                ? "Costellazione salvata. L’immagine è stata inviata anche all’area admin."
-                                : "Costellazione salvata nell’area admin, ma lo screenshot automatico non è stato generato. Fai ora uno screenshot manuale del piano, poi allegalo e invialo separatamente su WhatsApp a Graziamaria insieme al report.");
+                              showAlert(
+                                'Costellazione salvata',
+                                screenshotUrl
+                                  ? 'Costellazione salvata. L’immagine è stata inviata anche all’area admin.'
+                                  : 'Costellazione salvata nell’area admin, ma lo screenshot automatico non è stato generato. Fai ora uno screenshot manuale del piano, poi allegalo e invialo separatamente su WhatsApp a Graziamaria insieme al report.'
+                              );
                             }
                           } catch (error: any) {
                             console.error('Errore salvataggio costellazione:', error);
-                            alert(`Impossibile salvare la costellazione. ${error?.message || 'Controlla il collegamento Firebase.'}`);
+                            showAlert('Errore salvataggio', `Impossibile salvare la costellazione. ${error?.message || 'Controlla il collegamento Firebase.'}`);
                           }
                         }}
                         className="flex items-center justify-center gap-2 bg-[#c2b280] text-white transition-all shadow-lg hover:bg-[#b1a170] px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
@@ -2432,10 +2475,15 @@ export default function App() {
 
                   <button 
                     onClick={() => {
-                      if(window.confirm("Sei sicuro di voler svuotare il campo?")) {
-                        setCharacters([]);
-                        setWorkflowStep(0);
-                      }
+                      showConfirm(
+                        'Svuota campo',
+                        'Sei sicuro di voler svuotare il campo?',
+                        () => {
+                          setCharacters([]);
+                          setWorkflowStep(0);
+                        },
+                        { danger: true }
+                      );
                     }}
                     className="flex items-center justify-center gap-2 text-red-500 hover:bg-red-50 transition-colors border border-red-100 px-4 h-10 rounded-full"
                     title="Svuota Campo"
@@ -2685,10 +2733,15 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     onClick={async () => {
-                      if (!user) { alert("Effettua il login per salvare."); return; }
-                      await saveRuneReading(userData.domandaRune, selectedRunesIds);
-                      alert("Questionario Rune salvato in Area Personale!");
-                      fetchHistory(user.uid);
+                      if (!user) { showAlert('Accesso richiesto', 'Effettua il login per salvare.'); return; }
+                      try {
+                        await saveRuneReading(userData.domandaRune, selectedRunesIds);
+                        showAlert('Salvataggio completato', 'Questionario Rune salvato in Area Personale!');
+                        fetchHistory(user.uid);
+                      } catch (error: any) {
+                        console.error('Errore salvataggio rune:', error);
+                        showAlert('Errore salvataggio', 'Impossibile salvare il questionario Rune.');
+                      }
                     }}
                     className="inline-flex items-center gap-2 bg-[#4a3f35] text-white px-8 py-3 rounded-full text-xs font-bold uppercase tracking-widest shadow-lg hover:bg-black transition-all"
                   >
@@ -2861,8 +2914,7 @@ export default function App() {
                 <button 
                   onClick={() => {
                     if (!user) {
-                      alert("Per favore, effettua l'accesso per candidarti.");
-                      login();
+                      showAlert('Accesso richiesto', "Per favore, effettua l'accesso per candidarti.", login);
                     } else {
                       openCandidacyModal();
                     }
@@ -3249,10 +3301,15 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     onClick={async () => {
-                      if (!user) { alert("Effettua il login per salvare."); return; }
-                      await saveFlowerReading(selectedFlowersIds);
-                      alert("Fiori salvati in Area Personale!");
-                      fetchHistory(user.uid);
+                      if (!user) { showAlert('Accesso richiesto', 'Effettua il login per salvare.'); return; }
+                      try {
+                        await saveFlowerReading(selectedFlowersIds);
+                        showAlert('Salvataggio completato', 'Fiori salvati in Area Personale!');
+                        fetchHistory(user.uid);
+                      } catch (error: any) {
+                        console.error('Errore salvataggio fiori:', error);
+                        showAlert('Errore salvataggio', 'Impossibile salvare i fiori selezionati.');
+                      }
                     }}
                     className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 sm:py-3 bg-[#4a3f35] text-white rounded-xl sm:rounded-2xl shadow-md hover:bg-black transition-all font-bold text-xs sm:text-sm whitespace-nowrap border border-white/20"
                   >
@@ -3983,6 +4040,90 @@ export default function App() {
                       <p className="text-[10px] text-center opacity-40 leading-relaxed px-4">Premendo il tasto sopra, accetti che i tuoi dati sensibili vengano trattati per fini di consulenza energetica da Graziamaria.</p>
                     </div>
                   </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* In-App Alert & Confirm Dialog Modal */}
+      <AnimatePresence>
+        {appDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={async () => {
+              const closeAction = appDialog.mode === 'alert' ? appDialog.onClose : undefined;
+              setAppDialog(null);
+              if (closeAction) await closeAction();
+            }}
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-[#4a3f35]/40 backdrop-blur-md p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.92, y: 16 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, y: 16 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-2xl max-w-md w-full border border-[#e5e0d8]"
+            >
+              <div className="flex justify-between items-start gap-4 mb-4">
+                <h3 className="text-xl sm:text-2xl font-serif italic text-[#4a3f35]">{appDialog.title}</h3>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const closeAction = appDialog.mode === 'alert' ? appDialog.onClose : undefined;
+                    setAppDialog(null);
+                    if (closeAction) await closeAction();
+                  }}
+                  className="p-2 hover:bg-[#f8f5f0] rounded-full transition-colors text-[#4a3f35]"
+                  aria-label="Chiudi"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="text-sm text-[#4a3f35]/80 leading-relaxed whitespace-pre-line mb-6">
+                {appDialog.message}
+              </p>
+              <div className="flex justify-end gap-3">
+                {appDialog.mode === 'confirm' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setAppDialog(null)}
+                      className="px-5 py-2.5 rounded-full text-xs font-bold uppercase tracking-wider border border-[#e5e0d8] text-[#4a3f35] hover:bg-[#f8f5f0] transition-all"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const action = appDialog.onConfirm;
+                        setAppDialog(null);
+                        if (action) await action();
+                      }}
+                      className={`px-6 py-2.5 rounded-full text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-all ${
+                        appDialog.danger
+                          ? 'bg-red-600 hover:bg-red-700'
+                          : 'bg-[#c2b280] hover:bg-[#b1a170]'
+                      }`}
+                    >
+                      Conferma
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const closeAction = appDialog.onClose;
+                      setAppDialog(null);
+                      if (closeAction) await closeAction();
+                    }}
+                    className="px-8 py-2.5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#c2b280] text-white hover:bg-[#b1a170] shadow-lg transition-all"
+                  >
+                    OK
+                  </button>
                 )}
               </div>
             </motion.div>
