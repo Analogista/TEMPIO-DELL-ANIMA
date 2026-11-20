@@ -47,6 +47,7 @@ import {
   getDocs,
   query,
   orderBy,
+  where,
   serverTimestamp,
   updateDoc,
   deleteDoc,
@@ -1547,6 +1548,13 @@ export default function App() {
   const [isPublishingAkashic, setIsPublishingAkashic] = useState(false);
   const [isUpdatingAkashicStatus, setIsUpdatingAkashicStatus] = useState(false);
   const [akashicDraftSavedAt, setAkashicDraftSavedAt] = useState<Date | null>(null);
+  const [isDeletingAkashicRequestId, setIsDeletingAkashicRequestId] = useState<string | null>(null);
+  const [userAkashicRequests, setUserAkashicRequests] = useState<any[]>([]);
+  const [userAkashicReadingsMap, setUserAkashicReadingsMap] = useState<Record<string, any>>({});
+  const [seenAkashicReadingIds, setSeenAkashicReadingIds] = useState<string[]>([]);
+  const [openedUserAkashicRequestId, setOpenedUserAkashicRequestId] = useState<string | null>(null);
+  const [isLoadingUserAkashic, setIsLoadingUserAkashic] = useState(false);
+  const [isRequestingAkashicDeletionId, setIsRequestingAkashicDeletionId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const isAdmin = user?.email === 'analogistabrindisi@gmail.com' || user?.email === 'infantinograziamaria@gmail.com';
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -1640,6 +1648,93 @@ export default function App() {
       console.error("Error fetching history:", e);
     }
   };
+
+  const getAkashicSeenStorageKey = (uid: string) => `tempio_akashic_seen_${uid}`;
+
+  const loadSeenAkashicIds = (uid: string): string[] => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem(getAkashicSeenStorageKey(uid));
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const markAkashicReadingSeen = (uid: string, requestId: string) => {
+    setSeenAkashicReadingIds(prev => {
+      const next = prev.includes(requestId) ? prev : [...prev, requestId];
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(getAkashicSeenStorageKey(uid), JSON.stringify(next));
+        } catch {
+          // ignore localStorage errors
+        }
+      }
+      return next;
+    });
+  };
+
+  const fetchUserAkashic = async (uid: string) => {
+    setIsLoadingUserAkashic(true);
+    setSeenAkashicReadingIds(loadSeenAkashicIds(uid));
+    try {
+      const reqSnap = await getDocs(query(collection(db, 'akashicRequests'), where('ownerUid', '==', uid)));
+      const sortedReqs = reqSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a: any, b: any) => {
+          const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          return tb - ta;
+        });
+      setUserAkashicRequests(sortedReqs);
+
+      const nextReadingsMap: Record<string, any> = {};
+      try {
+        const readSnap = await getDocs(
+          query(
+            collection(db, 'akashicReadings'),
+            where('ownerUid', '==', uid),
+            where('published', '==', true)
+          )
+        );
+        readSnap.docs.forEach(d => {
+          nextReadingsMap[d.id] = { id: d.id, ...d.data() };
+        });
+      } catch {
+        const completedReqs = sortedReqs.filter((r: any) => r.status === 'completata');
+        const settled = await Promise.all(
+          completedReqs.map(async (r: any) => {
+            try {
+              const snap = await getDoc(doc(db, 'akashicReadings', r.id));
+              if (snap.exists() && snap.data()?.published === true) {
+                return { id: snap.id, ...snap.data() };
+              }
+            } catch {
+              // ignore unpublished or inaccessible docs
+            }
+            return null;
+          })
+        );
+        settled.forEach(item => {
+          if (item) nextReadingsMap[item.id] = item;
+        });
+      }
+      setUserAkashicReadingsMap(nextReadingsMap);
+    } catch (e) {
+      console.error("Error fetching user Akashic requests:", e);
+    } finally {
+      setIsLoadingUserAkashic(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentPage === 'profile' && user?.uid) {
+      void fetchUserAkashic(user.uid);
+    }
+  }, [currentPage, user?.uid]);
 
   const fetchAdminData = async () => {
     if (!isAdmin) return;
@@ -1909,6 +2004,26 @@ export default function App() {
           );
           setAkashicSavedChapters(chaptersSnapshot);
           setAkashicDraftSavedAt(now);
+
+          const clientEmail = (req.email || '').trim();
+          const mailSubject = "Il tuo Libro dell'Anima è pronto";
+          const mailBody = "Il tuo Libro dell'Anima è pronto. GraziaMaria ha preparato personalmente la tua lettura. Puoi accedere alla tua area riservata e iniziare il tuo viaggio.";
+          showConfirm(
+            'Lettura pubblicata',
+            'Lettura pubblicata. Vuoi avvisare il cliente?',
+            () => {
+              const mailtoHref = `mailto:${encodeURIComponent(clientEmail)}?subject=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(mailBody)}`;
+              const link = document.createElement('a');
+              link.href = mailtoHref;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            },
+            {
+              confirmLabel: 'Scrivi email',
+              cancelLabel: 'Chiudi'
+            }
+          );
         } catch (error) {
           console.error('Errore pubblicazione lettura akashica:', error);
           showAlert('Errore pubblicazione', 'Non è stato possibile pubblicare la lettura.');
@@ -1968,6 +2083,77 @@ export default function App() {
     } finally {
       setIsPublishingAkashic(false);
     }
+  };
+
+  const deleteAkashicRequest = (req: any) => {
+    if (!isAdmin || !req || isDeletingAkashicRequestId) return;
+    const clientName = req.name || 'questo cliente';
+    showConfirm(
+      'Elimina richiesta',
+      `Eliminare definitivamente la richiesta di ${clientName} e l'eventuale lettura? L'operazione non si può annullare.`,
+      async () => {
+        setIsDeletingAkashicRequestId(req.id);
+        try {
+          const batch = writeBatch(db);
+          batch.delete(doc(db, 'akashicRequests', req.id));
+          batch.delete(doc(db, 'akashicReadings', req.id));
+          await batch.commit();
+          setAkashicRequestsList(prev => prev.filter(item => item.id !== req.id));
+          setAkashicReadingsMap(prev => {
+            const next = { ...prev };
+            delete next[req.id];
+            return next;
+          });
+          if (selectedAkashicRequestId === req.id) {
+            setSelectedAkashicRequestId(null);
+            setAkashicEditorChapters(['', '', '', '', '', '', '']);
+            setAkashicSavedChapters(['', '', '', '', '', '', '']);
+            setAkashicDraftSavedAt(null);
+          }
+        } catch (error) {
+          console.error('Errore eliminazione richiesta akashica:', error);
+          showAlert('Errore eliminazione', 'Non è stato possibile eliminare la richiesta.');
+        } finally {
+          setIsDeletingAkashicRequestId(null);
+        }
+      },
+      {
+        danger: true,
+        confirmLabel: 'Elimina',
+        cancelLabel: 'Annulla'
+      }
+    );
+  };
+
+  const requestAkashicDeletion = (req: any) => {
+    if (!user || !req || req.deletionRequested === true || isRequestingAkashicDeletionId) return;
+    showConfirm(
+      'Richiedi cancellazione dati',
+      'Vuoi richiedere a GraziaMaria la cancellazione definitiva dei dati relativi a questa richiesta?',
+      async () => {
+        setIsRequestingAkashicDeletionId(req.id);
+        try {
+          await updateDoc(doc(db, 'akashicRequests', req.id), { deletionRequested: true });
+          setUserAkashicRequests(prev =>
+            prev.map(item => (item.id === req.id ? { ...item, deletionRequested: true } : item))
+          );
+        } catch (error) {
+          try {
+            handleFirestoreError(error, 'update', `akashicRequests/${req.id}`);
+          } catch (structuredErr) {
+            console.error('Errore richiesta cancellazione dati akashici:', structuredErr);
+          }
+          showAlert('Errore richiesta', 'Non è stato possibile inviare la richiesta di cancellazione.');
+        } finally {
+          setIsRequestingAkashicDeletionId(null);
+        }
+      },
+      {
+        danger: true,
+        confirmLabel: 'Conferma',
+        cancelLabel: 'Annulla'
+      }
+    );
   };
 
   const updateCandidacyNote = async (id: string, note: string) => {
@@ -2128,6 +2314,13 @@ export default function App() {
     setAkashicEditorChapters(['', '', '', '', '', '', '']);
     setAkashicSavedChapters(['', '', '', '', '', '', '']);
     setAkashicDraftSavedAt(null);
+    setIsDeletingAkashicRequestId(null);
+    setUserAkashicRequests([]);
+    setUserAkashicReadingsMap({});
+    setSeenAkashicReadingIds([]);
+    setOpenedUserAkashicRequestId(null);
+    setIsLoadingUserAkashic(false);
+    setIsRequestingAkashicDeletionId(null);
     setSelectedRunesIds([]);
     setCurrentRune(null);
     setSelectedFlowersIds([]);
@@ -2203,6 +2396,7 @@ export default function App() {
       setUser(u);
 
       fetchHistory(u.uid);
+      void fetchUserAkashic(u.uid);
       // Create/Update public profile
       const profileRef = doc(db, 'users', u.uid, 'profile', 'data');
       try {
@@ -3339,6 +3533,7 @@ export default function App() {
         deletionRequested: false
       };
       await addDoc(collection(db, 'akashicRequests'), payload);
+      void fetchUserAkashic(user.uid);
       setAkashicSubmitted(true);
       setShowAkashicForm(false);
       setShowAkashicPrivacy(false);
@@ -3650,6 +3845,7 @@ export default function App() {
 
               {(() => {
                 const akashicNewCount = akashicRequestsList.filter(r => r.status === 'nuova').length;
+                const akashicDeletionCount = akashicRequestsList.filter(r => r.deletionRequested === true).length;
                 const akashicInProgressCount = akashicRequestsList.filter(r => r.status === 'in_lavorazione').length;
                 const akashicCompletedCount = akashicRequestsList.filter(r => r.status === 'completata').length;
                 const normalizedAkashicSearch = akashicAdminSearch.trim().toLowerCase();
@@ -3745,6 +3941,9 @@ export default function App() {
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${akashicNewCount > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-white text-[#4a3f35]/70 border border-[#e5e0d8]'}`}>
                           Nuove: {akashicNewCount}
                         </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${akashicDeletionCount > 0 ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-white text-[#4a3f35]/70 border border-[#e5e0d8]'}`}>
+                          Cancellazioni: {akashicDeletionCount}
+                        </span>
                       </button>
                     </div>
 
@@ -3761,6 +3960,11 @@ export default function App() {
                                 <X size={14} /> Torna all&apos;elenco
                               </button>
                               <div className="flex flex-wrap items-center gap-2.5">
+                                {selectedAkashicRequest.deletionRequested === true && (
+                                  <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-100 text-red-700 border border-red-300">
+                                    Cancellazione richiesta
+                                  </span>
+                                )}
                                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${(statusLabelMap[selectedAkashicRequest.status] || statusLabelMap.nuova).cls}`}>
                                   {(statusLabelMap[selectedAkashicRequest.status] || statusLabelMap.nuova).label}
                                 </span>
@@ -3770,6 +3974,15 @@ export default function App() {
                                 >
                                   <Send size={13} /> Scrivi email al cliente
                                 </a>
+                                <button
+                                  type="button"
+                                  disabled={isDeletingAkashicRequestId === selectedAkashicRequest.id}
+                                  onClick={() => deleteAkashicRequest(selectedAkashicRequest)}
+                                  className="px-4 py-2 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-bold uppercase tracking-wider hover:bg-red-100 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                                >
+                                  <Trash2 size={13} />
+                                  <span>Elimina richiesta</span>
+                                </button>
                               </div>
                             </div>
 
@@ -3777,7 +3990,14 @@ export default function App() {
                             <div className="bg-[#fdfbf7] p-6 sm:p-8 rounded-3xl border border-[#e5e0d8] shadow-sm space-y-6">
                               <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-[#e5e0d8] pb-5">
                                 <div>
-                                  <h2 className="font-serif italic text-3xl text-[#4a3f35]">{selectedAkashicRequest.name || 'Cliente'}</h2>
+                                  <div className="flex flex-wrap items-center gap-2.5">
+                                    <h2 className="font-serif italic text-3xl text-[#4a3f35]">{selectedAkashicRequest.name || 'Cliente'}</h2>
+                                    {selectedAkashicRequest.deletionRequested === true && (
+                                      <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-100 text-red-700 border border-red-300">
+                                        Cancellazione richiesta
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-[#5a5a40] font-medium mt-1">{selectedAkashicRequest.email}</p>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
@@ -3974,6 +4194,9 @@ export default function App() {
                                   <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${akashicNewCount > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
                                     Nuove: {akashicNewCount}
                                   </span>
+                                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${akashicDeletionCount > 0 ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                                    Cancellazioni: {akashicDeletionCount}
+                                  </span>
                                 </div>
                                 <div className="relative w-full sm:w-80">
                                   <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#4a3f35]/40 pointer-events-none" />
@@ -4077,30 +4300,49 @@ export default function App() {
                                     ? req.createdAt.toDate().toLocaleDateString('it-IT')
                                     : 'Recente';
                                   return (
-                                    <button
+                                    <div
                                       key={req.id}
-                                      type="button"
-                                      onClick={() => openAkashicRequestDetail(req)}
-                                      className={`w-full text-left p-5 rounded-2xl border shadow-sm transition-all flex flex-wrap items-center justify-between gap-3 ${
+                                      className={`w-full p-5 rounded-2xl border shadow-sm transition-all flex items-center justify-between gap-3 ${
                                         req.status === 'nuova'
                                           ? 'bg-[#fdfbf7] border-[#c2b280] hover:bg-white'
                                           : 'bg-white border-[#e5e0d8] hover:border-[#c2b280]'
                                       }`}
                                     >
-                                      <div className="flex items-center gap-3 flex-wrap">
-                                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${badge.cls}`}>
-                                          {badge.label}
-                                        </span>
-                                        <div>
-                                          <p className="font-bold text-[#4a3f35]">{req.name || 'Cliente senza nome'}</p>
-                                          <p className="text-[11px] opacity-60">{req.area} · {req.email}</p>
+                                      <button
+                                        type="button"
+                                        onClick={() => openAkashicRequestDetail(req)}
+                                        className="flex-1 text-left flex flex-wrap items-center justify-between gap-3 min-w-0"
+                                      >
+                                        <div className="flex items-center gap-3 flex-wrap min-w-0">
+                                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${badge.cls}`}>
+                                            {badge.label}
+                                          </span>
+                                          {req.deletionRequested === true && (
+                                            <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-red-100 text-red-700 border border-red-300">
+                                              Cancellazione richiesta
+                                            </span>
+                                          )}
+                                          <div className="min-w-0">
+                                            <p className="font-bold text-[#4a3f35] truncate">{req.name || 'Cliente senza nome'}</p>
+                                            <p className="text-[11px] opacity-60 truncate">{req.area} · {req.email}</p>
+                                          </div>
                                         </div>
-                                      </div>
-                                      <div className="flex items-center gap-3">
-                                        <span className="text-[10px] opacity-60">{dateLabel}</span>
-                                        <ChevronDown size={16} className="text-[#4a3f35]/50 -rotate-90" />
-                                      </div>
-                                    </button>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <span className="text-[10px] opacity-60">{dateLabel}</span>
+                                          <ChevronDown size={16} className="text-[#4a3f35]/50 -rotate-90" />
+                                        </div>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isDeletingAkashicRequestId === req.id}
+                                        onClick={() => deleteAkashicRequest(req)}
+                                        title="Elimina richiesta"
+                                        aria-label="Elimina richiesta"
+                                        className="p-2.5 rounded-full text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition-all shrink-0 disabled:opacity-50"
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                    </div>
                                   );
                                 })}
                                 {filteredAkashicRequests.length === 0 && (
@@ -6956,6 +7198,120 @@ export default function App() {
                 </div>
               </div>
 
+              {/* I miei Registri Akashici */}
+              <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-[#e5e0d8]">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-3">
+                    <BookOpen className="text-[#c2b280]" size={24} />
+                    <h3 className="font-serif italic text-2xl text-[#4a3f35]">I miei Registri Akashici</h3>
+                  </div>
+                </div>
+                <p className="text-sm opacity-70 mb-6 leading-relaxed">
+                  Qui trovi lo stato delle tue richieste e le letture del tuo Libro dell&apos;Anima preparate da GraziaMaria.
+                </p>
+
+                {isLoadingUserAkashic ? (
+                  <div className="text-center py-8 text-xs opacity-60 italic">Caricamento dei tuoi Registri Akashici...</div>
+                ) : userAkashicRequests.length === 0 ? (
+                  <div className="text-center py-10 bg-[#fdfbf7] rounded-3xl border border-dashed border-[#e5e0d8]">
+                    <BookOpen className="mx-auto mb-3 text-[#c2b280] opacity-40" size={30} />
+                    <p className="text-sm opacity-60 italic">Non hai ancora richiesto una lettura dei Registri Akashici.</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAkashicForm(false);
+                        setShowAkashicPrivacy(false);
+                        setAkashicSubmitted(false);
+                        setCurrentPage('registri');
+                      }}
+                      className="mt-4 text-[#c2b280] text-xs font-bold uppercase tracking-widest hover:underline"
+                    >
+                      Scopri i Registri Akashici
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {userAkashicRequests.map((req) => {
+                      const clientStatusMap: Record<string, { label: string; cls: string }> = {
+                        nuova: { label: 'Ricevuta', cls: 'bg-amber-50 text-amber-800 border border-amber-200' },
+                        in_lavorazione: { label: 'In preparazione', cls: 'bg-[#f8f5f0] text-[#5a5a40] border border-[#c2b280]' },
+                        completata: { label: 'Pronta', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' }
+                      };
+                      const statusBadge = clientStatusMap[req.status] || clientStatusMap.nuova;
+                      const dateLabel = req.createdAt?.toDate
+                        ? req.createdAt.toDate().toLocaleDateString('it-IT')
+                        : 'Recente';
+                      const publishedReading =
+                        req.status === 'completata' && userAkashicReadingsMap[req.id]?.published === true
+                          ? userAkashicReadingsMap[req.id]
+                          : null;
+                      const isNewForDevice = Boolean(publishedReading && !seenAkashicReadingIds.includes(req.id));
+
+                      return (
+                        <div key={req.id} className="p-6 bg-[#fdfbf7] rounded-3xl border border-[#e5e0d8] shadow-sm space-y-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[10px] font-bold text-[#c2b280] uppercase tracking-widest">{dateLabel}</p>
+                              <h4 className="font-serif italic text-xl text-[#4a3f35] mt-0.5">{req.area}</h4>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {isNewForDevice && (
+                                <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-[#c2b280] text-white shadow-sm">
+                                  Nuova
+                                </span>
+                              )}
+                              <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${statusBadge.cls}`}>
+                                {statusBadge.label}
+                              </span>
+                            </div>
+                          </div>
+
+                          {publishedReading && (
+                            <div className="p-5 bg-white rounded-2xl border border-[#c2b280]/60 shadow-sm space-y-4">
+                              <p className="text-sm text-[#4a3f35] leading-relaxed font-serif italic">
+                                Il tuo Libro dell&apos;Anima è pronto. GraziaMaria ha preparato personalmente la tua lettura. Puoi accedere alla tua area riservata e iniziare il tuo viaggio.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (user?.uid) {
+                                    markAkashicReadingSeen(user.uid, req.id);
+                                  }
+                                  setOpenedUserAkashicRequestId(req.id);
+                                }}
+                                className="px-6 py-3 rounded-full bg-[#c2b280] text-white text-xs font-bold uppercase tracking-wider hover:bg-[#b1a170] shadow-md transition-all flex items-center gap-2"
+                              >
+                                <BookOpen size={15} />
+                                <span>Apri il tuo Libro dell&apos;Anima</span>
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="pt-2 border-t border-[#e5e0d8]/80 flex flex-wrap items-center justify-between gap-2">
+                            {req.deletionRequested === true ? (
+                              <span className="text-xs font-bold text-[#5a5a40] italic">
+                                Richiesta inviata a GraziaMaria
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={isRequestingAkashicDeletionId === req.id}
+                                onClick={() => requestAkashicDeletion(req)}
+                                className="text-xs font-bold text-red-700 hover:text-red-800 hover:underline disabled:opacity-50 transition-colors"
+                              >
+                                {isRequestingAkashicDeletionId === req.id
+                                  ? 'Invio richiesta...'
+                                  : 'Richiedi la cancellazione dei miei dati'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               <div className="text-center italic opacity-60 text-sm">
                 "Ogni passo salvato è una verità ritrovata."
               </div>
@@ -8043,6 +8399,89 @@ export default function App() {
             />
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* Client Akashic 7-Chapter Reading Modal */}
+      <AnimatePresence>
+        {openedUserAkashicRequestId && userAkashicReadingsMap[openedUserAkashicRequestId]?.published === true && (() => {
+          const openedReq = userAkashicRequests.find(r => r.id === openedUserAkashicRequestId);
+          const openedReading = userAkashicReadingsMap[openedUserAkashicRequestId];
+          const chapters: string[] = Array.isArray(openedReading?.chapters) ? openedReading.chapters : [];
+          const openedDateLabel = openedReq?.createdAt?.toDate
+            ? openedReq.createdAt.toDate().toLocaleDateString('it-IT')
+            : '';
+
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setOpenedUserAkashicRequestId(null)}
+              className="fixed inset-0 z-[280] flex items-center justify-center bg-[#4a3f35]/55 backdrop-blur-sm p-3 sm:p-6"
+            >
+              <motion.div
+                initial={{ scale: 0.96, y: 16 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.96, y: 16 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-[#fdfbf7] w-full max-w-3xl max-h-[90vh] rounded-[28px] sm:rounded-[36px] border-2 border-[#c2b280]/70 shadow-2xl flex flex-col overflow-hidden"
+              >
+                <div className="px-6 sm:px-8 py-5 bg-white border-b border-[#e5e0d8] flex items-start justify-between gap-4 shrink-0">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.25em] font-black text-[#c2b280]">
+                      I Registri Akashici
+                    </p>
+                    <h3 className="font-serif italic text-2xl sm:text-3xl text-[#4a3f35] mt-0.5">
+                      Il tuo Libro dell&apos;Anima
+                    </h3>
+                    {(openedReq?.area || openedDateLabel) && (
+                      <p className="text-xs text-[#5a5a40] mt-1">
+                        {openedReq?.area}{openedReq?.area && openedDateLabel ? ' · ' : ''}{openedDateLabel}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOpenedUserAkashicRequestId(null)}
+                    className="p-2.5 rounded-full bg-[#f8f5f0] text-[#4a3f35] hover:bg-[#e5e0d8] transition-colors shrink-0"
+                    aria-label="Chiudi lettura"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-5 sm:px-8 py-6 space-y-6">
+                  {AKASHIC_CHAPTERS.map((chapter, idx) => (
+                    <section
+                      key={chapter.title}
+                      className="p-5 sm:p-7 rounded-3xl bg-white border border-[#c2b280]/45 shadow-sm space-y-3"
+                    >
+                      <div className="border-b border-[#e5e0d8] pb-3">
+                        <h4 className="font-serif italic text-lg sm:text-xl font-bold text-[#c2b280]">
+                          {chapter.title}
+                        </h4>
+                        <p className="text-xs text-[#5a5a40] mt-0.5">({chapter.subtitle})</p>
+                      </div>
+                      <p className="text-sm sm:text-base text-[#4a3f35] leading-relaxed whitespace-pre-wrap">
+                        {(chapters[idx] || '').trim() || '—'}
+                      </p>
+                    </section>
+                  ))}
+                </div>
+
+                <div className="px-6 sm:px-8 py-4 bg-white border-t border-[#e5e0d8] flex justify-end shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setOpenedUserAkashicRequestId(null)}
+                    className="px-6 py-2.5 rounded-full bg-[#c2b280] text-white text-xs font-bold uppercase tracking-wider hover:bg-[#b1a170] shadow-md transition-all"
+                  >
+                    Chiudi
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* In-App Alert & Confirm Dialog Modal */}

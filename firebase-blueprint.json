@@ -296,7 +296,9 @@
         "status": {
           "type": "string",
           "enum": [
-            "nuova"
+            "nuova",
+            "in_lavorazione",
+            "completata"
           ]
         },
         "createdAt": {
@@ -304,7 +306,8 @@
           "format": "date-time"
         },
         "deletionRequested": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Set to false on creation; owner may transition from false to true to request data deletion."
         }
       },
       "required": [
