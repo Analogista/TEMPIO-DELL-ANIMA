@@ -6,6 +6,7 @@ import {
   X, 
   ChevronDown, 
   Share2, 
+  Send,
   FileText, 
   Heart, 
   Frown,
@@ -54,6 +55,13 @@ import {
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { auth, db, storage, handleFirestoreError } from './lib/firebase';
 
+type BuildingSlotType = {
+  floor: number; // 1 (pianoterra) .. 10 (ultimo piano)
+  col: number;   // 0 .. 4 da sinistra dello schermo
+};
+
+type ConstellationLayoutType = 'stairs' | 'building';
+
 // Types for our game
 type CharacterType = {
   id: string;
@@ -62,8 +70,9 @@ type CharacterType = {
   label: string;
   x: number;
   y: number;
-  stair: 'upper' | 'lower';
-  normalizedX: number;
+  stair?: 'upper' | 'lower';
+  normalizedX?: number;
+  slot?: BuildingSlotType;
   feeling?: 'piacevole' | 'spiacevole';
   memory?: string;
   snapSeq?: number;
@@ -138,6 +147,18 @@ const CHARACTER_SHAPES = [
   { shape: 'cylindrical-large', color: '#f97316' }, // Orange
 ] as const;
 
+const CHARACTER_PICKER_ORDER = [
+  0, 1, 2, 24,
+  3, 4, 5, 6, 25,
+  7, 8, 9, 10, 26,
+  11, 12, 13, 14, 27,
+  15, 16, 17, 18, 28,
+  19, 20, 21, 22, 29,
+  23
+] as const;
+
+const CHARACTER_PICKER_SHAPES = CHARACTER_PICKER_ORDER.map(i => CHARACTER_SHAPES[i]);
+
 const PREDEFINED_LABELS = [
   "Io", "Mamma", "Papà", "Fratello", "Sorella", "Nonno", "Nonna", 
   "Partner", "Figlio", "Figlia", "Amico", "Lavoro", "Paura", "Sogno"
@@ -146,6 +167,7 @@ const PREDEFINED_LABELS = [
 type PositionCharacter = Pick<CharacterType, 'id' | 'label' | 'x' | 'y'> & {
   stair?: 'upper' | 'lower';
   normalizedX?: number;
+  slot?: BuildingSlotType;
   feeling?: 'piacevole' | 'spiacevole';
   memory?: string;
 };
@@ -153,6 +175,77 @@ type PositionCharacter = Pick<CharacterType, 'id' | 'label' | 'x' | 'y'> & {
 const STAGE_IMAGE_URL = '/assets/aistudio/gradini-frontali_8b28bf22.webp';
 const STAGE_REF_WIDTH = 1600;
 const STAGE_REF_HEIGHT = 900;
+
+const BUILDING_IMAGE_URL = '/assets/aistudio/palazzo-liberty_96e2067f.webp';
+const BUILDING_REF_WIDTH = 1000;
+const BUILDING_REF_HEIGHT = 2000;
+const BUILDING_FLOORS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
+const BUILDING_COLS = [0, 1, 2, 3, 4] as const;
+const BUILDING_COL_X_PCTS = [14.8, 32.4, 50.0, 67.6, 85.2] as const;
+const BUILDING_FLOOR_Y_PCTS = [90.5, 81.5, 72.5, 63.5, 54.5, 45.5, 36.5, 27.5, 18.5, 9.5] as const;
+const BUILDING_WINDOW_WIDTH_PCT = 12;
+const BUILDING_WINDOW_HEIGHT_PCT = 6;
+const MAX_CONSTELLATION_FIGURES = 50;
+
+function getBuildingSlotCenterPct(slot: BuildingSlotType): { xPct: number; yPct: number } {
+  const floorIdx = Math.min(9, Math.max(0, Math.round(slot.floor) - 1));
+  const colIdx = Math.min(4, Math.max(0, Math.round(slot.col)));
+  return {
+    xPct: BUILDING_COL_X_PCTS[colIdx],
+    yPct: BUILDING_FLOOR_Y_PCTS[floorIdx]
+  };
+}
+
+function getBuildingSlotRefCoords(slot: BuildingSlotType): { x: number; y: number } {
+  const { xPct, yPct } = getBuildingSlotCenterPct(slot);
+  return {
+    x: Math.round((xPct / 100) * BUILDING_REF_WIDTH),
+    y: Math.round((yPct / 100) * BUILDING_REF_HEIGHT)
+  };
+}
+
+function isBuildingSlotOccupied(
+  chars: Array<Pick<CharacterType, 'id' | 'slot'>>,
+  slot: BuildingSlotType,
+  ignoreCharId?: string
+): boolean {
+  return chars.some(
+    c => c.id !== ignoreCharId && c.slot?.floor === slot.floor && c.slot?.col === slot.col
+  );
+}
+
+function findNearestFreeBuildingSlot(
+  xPct: number,
+  yPct: number,
+  chars: Array<Pick<CharacterType, 'id' | 'slot'>>,
+  ignoreCharId?: string
+): BuildingSlotType | null {
+  let bestSlot: BuildingSlotType | null = null;
+  let bestDist = Infinity;
+
+  for (const floor of BUILDING_FLOORS) {
+    for (const col of BUILDING_COLS) {
+      const candidate = { floor, col };
+      if (isBuildingSlotOccupied(chars, candidate, ignoreCharId)) continue;
+      const center = getBuildingSlotCenterPct(candidate);
+      const dx = xPct - center.xPct;
+      const dy = (yPct - center.yPct) * 2; // compensa rapporto 1:2 dell'immagine
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestSlot = candidate;
+      }
+    }
+  }
+  return bestSlot;
+}
+
+function getBuildingFigureScale(stageW: number): number {
+  const safeW = stageW > 0 ? stageW : 520;
+  const windowPx = safeW * (BUILDING_WINDOW_WIDTH_PCT / 100);
+  // Il pupazzo più alto (large) misura 107px non scalato
+  return Math.max(0.22, Math.min(0.55, (windowPx * 0.78) / 107));
+}
 
 const STAIR_GEOMETRY = {
   upper: { yRatio: 0.478, minXRatio: 0.2375, maxXRatio: 0.7625 },
@@ -339,7 +432,8 @@ function describeProximityBandByStageRatio(distanceStageRatio: number): 'vicino'
 function describeCharacterPosition(
   characters: PositionCharacter[],
   targetId: string,
-  layoutVersion?: number
+  layoutVersion?: number,
+  layoutType?: ConstellationLayoutType | string
 ) {
   if (layoutVersion !== 2) {
     return {
@@ -351,6 +445,37 @@ function describeCharacterPosition(
 
   const target = characters.find(character => character.id === targetId);
   if (!target) return null;
+
+  if (layoutType === 'building' || target.slot) {
+    const slot = target.slot;
+    if (!slot) {
+      return {
+        stair: 'Palazzo',
+        summary: 'Palazzo · finestra non definita',
+        isLegacy: false as const
+      };
+    }
+    const parts = [`Piano ${slot.floor}`, `Finestra ${slot.col + 1} da sinistra`];
+    const ioChar = characters.find(
+      character => (character.label || '').trim().toLowerCase() === 'io'
+    );
+    if (!ioChar) {
+      parts.push('riferimento a Io: non presente');
+    } else if (ioChar.id !== target.id && ioChar.slot) {
+      if (slot.floor > ioChar.slot.floor) parts.push('piano sopra Io');
+      else if (slot.floor < ioChar.slot.floor) parts.push('piano sotto Io');
+      else parts.push('stesso piano di Io');
+
+      if (slot.col < ioChar.slot.col) parts.push('alla destra di Io');
+      else if (slot.col > ioChar.slot.col) parts.push('alla sinistra di Io');
+      else parts.push('in colonna con Io');
+    }
+    return {
+      stair: `Piano ${slot.floor}`,
+      summary: parts.join(' · '),
+      isLegacy: false as const
+    };
+  }
 
   const targetStair = getCharacterStairV2(target);
   const targetNormX = getCharacterNormalizedX(target);
@@ -512,9 +637,9 @@ function computePillLayout(characters: CharacterType[], stageWidth: number): Pil
 
   const layoutStairPills = (stair: 'upper' | 'lower'): { placed: RelPlacedPill[]; maxLane: number } => {
     const items = characters
-      .filter(c => c.stair === stair)
+      .filter(c => getCharacterStairV2(c) === stair)
       .map(char => {
-        const figX = getStairXRatio(stair, char.normalizedX) * safeW;
+        const figX = getStairXRatio(stair, getCharacterNormalizedX(char)) * safeW;
         const labelText = (char.label || 'Senza nome').trim() || 'Senza nome';
         const maxPillW = Math.min(isMobileStage ? 160 : 210, safeW - 12);
         const width = Math.min(
@@ -672,19 +797,22 @@ function getReadingTimestampMillis(read: any): number {
 
 function getConstellationPositionsSignature(read: any): string {
   const chars = Array.isArray(read?.characters) ? read.characters : [];
+  const layoutType = read?.userData?.layoutType || 'stairs';
   const normalized = chars
     .map((c: any) => ({
+      layoutType,
       shape: c.shape || '',
       color: c.color || '',
       label: c.label || '',
       stair: c.stair || '',
       normalizedX: typeof c.normalizedX === 'number' ? Math.round(c.normalizedX * 1000) : null,
+      slot: c.slot ? `${c.slot.floor}-${c.slot.col}` : '',
       x: Math.round(Number(c.x) || 0),
       y: Math.round(Number(c.y) || 0)
     }))
     .sort((a: any, b: any) =>
-      `${a.label}|${a.shape}|${a.stair}|${a.normalizedX ?? ''}|${a.x}|${a.y}`.localeCompare(
-        `${b.label}|${b.shape}|${b.stair}|${b.normalizedX ?? ''}|${b.x}|${b.y}`
+      `${a.layoutType}|${a.label}|${a.shape}|${a.stair}|${a.normalizedX ?? ''}|${a.slot}|${a.x}|${a.y}`.localeCompare(
+        `${b.layoutType}|${b.label}|${b.shape}|${b.stair}|${b.normalizedX ?? ''}|${b.slot}|${b.x}|${b.y}`
       )
     );
   return JSON.stringify(normalized);
@@ -949,12 +1077,14 @@ type ConstellationDraftCharacter = {
   label: string;
   feeling?: 'piacevole' | 'spiacevole';
   memory?: string;
-  stair: 'upper' | 'lower';
-  normalizedX: number;
+  stair?: 'upper' | 'lower';
+  normalizedX?: number;
+  slot?: BuildingSlotType;
 };
 
 type ConstellationDraftPayload = {
   savedAt: number;
+  layoutType?: ConstellationLayoutType;
   characters: ConstellationDraftCharacter[];
   userData: {
     nome: string;
@@ -985,6 +1115,7 @@ function clearConstellationDraft(uid?: string | null) {
 function saveConstellationDraft(
   uid: string | null | undefined,
   data: {
+    layoutType?: ConstellationLayoutType;
     characters: CharacterType[];
     userData: { nome: string; eta: string; sesso: string };
     pendingCharacter: PendingCharacterType | null;
@@ -992,8 +1123,10 @@ function saveConstellationDraft(
 ) {
   if (typeof window === 'undefined') return;
   try {
+    const layoutType: ConstellationLayoutType = data.layoutType === 'building' ? 'building' : 'stairs';
     const payload: ConstellationDraftPayload = {
       savedAt: Date.now(),
+      layoutType,
       characters: data.characters.map((c) => ({
         id: c.id,
         shape: c.shape,
@@ -1001,8 +1134,9 @@ function saveConstellationDraft(
         label: c.label,
         ...(c.feeling ? { feeling: c.feeling } : {}),
         ...(c.memory ? { memory: c.memory } : {}),
-        stair: getCharacterStairV2(c),
-        normalizedX: getCharacterNormalizedX(c)
+        ...(layoutType === 'building' && c.slot
+          ? { slot: { floor: c.slot.floor, col: c.slot.col } }
+          : { stair: getCharacterStairV2(c), normalizedX: getCharacterNormalizedX(c) })
       })),
       userData: {
         nome: data.userData.nome || '',
@@ -1047,6 +1181,7 @@ function loadConstellationDraft(uid?: string | null): ConstellationDraftPayload 
     }
     return {
       savedAt: parsed.savedAt,
+      layoutType: parsed.layoutType === 'building' ? 'building' : 'stairs',
       characters: chars,
       userData: {
         nome: parsed.userData?.nome || '',
@@ -1071,16 +1206,19 @@ type PendingCharacterType = {
 function AdminConstellationPreview({
   readId,
   characters,
+  layoutType = 'stairs',
   renderFigure
 }: {
   readId: string;
   characters: CharacterType[];
+  layoutType?: ConstellationLayoutType | string;
   renderFigure: (
     shape: string,
     color: string,
     densityScale: number,
     badgeNumber: number | undefined,
-    previewWidth: number
+    previewWidth: number,
+    scaleOverride?: number
   ) => React.ReactNode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1107,6 +1245,60 @@ function AdminConstellationPreview({
       window.removeEventListener('resize', updateWidth);
     };
   }, []);
+
+  if (layoutType === 'building') {
+    const buildingScale = getBuildingFigureScale(Math.min(320, previewW));
+    return (
+      <div className="mb-4 p-3 rounded-2xl border border-[#e5e0d8] bg-[#f8f5f0] w-full">
+        <div ref={containerRef} className="relative w-full max-w-[320px] mx-auto aspect-[1/2]">
+          <img
+            src={BUILDING_IMAGE_URL}
+            alt="Palazzo Costellazione"
+            className="relative z-10 w-full h-full object-contain pointer-events-none select-none"
+          />
+          {characters.map((character, idx) => {
+            if (!character.slot) return null;
+            const { xPct, yPct } = getBuildingSlotCenterPct(character.slot);
+            return (
+              <div
+                key={`admin-bldg-${readId}-${idx}`}
+                className="absolute z-30 pointer-events-none"
+                style={{
+                  left: `${xPct}%`,
+                  top: `${yPct}%`,
+                  width: `${BUILDING_WINDOW_WIDTH_PCT}%`,
+                  height: `${BUILDING_WINDOW_HEIGHT_PCT}%`,
+                  transform: 'translate(-50%, -50%)'
+                }}
+              >
+                <div
+                  className="absolute left-1/2 bottom-[14%] flex justify-center"
+                  style={{ transform: 'translateX(-50%)' }}
+                >
+                  {renderFigure(character.shape, character.color, 1, undefined, previewW, buildingScale)}
+                </div>
+                <div
+                  className="absolute left-1/2 -bottom-1 px-1 bg-white/95 rounded-full border text-[8px] font-bold text-[#4a3f35] whitespace-nowrap max-w-[125%] truncate"
+                  style={{
+                    transform: 'translateX(-50%)',
+                    borderColor:
+                      character.feeling === 'piacevole'
+                        ? '#4ade80'
+                        : character.feeling === 'spiacevole'
+                          ? '#f87171'
+                          : '#e5e0d8'
+                  }}
+                >
+                  {character.label || 'Senza nome'}
+                  {character.feeling ? (character.feeling === 'piacevole' ? ' ❤️' : ' 💔') : ''}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   const previewChars = characters.map((c) => ({
     ...c,
@@ -1221,9 +1413,13 @@ function AdminConstellationPreview({
 }
 
 export default function App() {
+  const [constellationLayoutType, setConstellationLayoutType] = useState<ConstellationLayoutType>('stairs');
   const [characters, setCharacters] = useState<CharacterType[]>([]);
   const [pendingCharacter, setPendingCharacter] = useState<PendingCharacterType | null>(null);
   const [isDraggingPending, setIsDraggingPending] = useState(false);
+  const [highlightedBuildingSlot, setHighlightedBuildingSlot] = useState<BuildingSlotType | null>(null);
+  const [buildingNotice, setBuildingNotice] = useState<string | null>(null);
+  const buildingNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [drawingCharacter, setDrawingCharacter] = useState<{ shape: string, color: string } | null>(null);
   const [tempLabel, setTempLabel] = useState('');
   const [showLabelInput, setShowLabelInput] = useState(false);
@@ -1581,9 +1777,12 @@ export default function App() {
     setSelectedFlowersIds([]);
     setSelectedFlower(null);
     setFlowerSearch('');
+    setConstellationLayoutType('stairs');
     setCharacters([]);
     setPendingCharacter(null);
     setIsDraggingPending(false);
+    setHighlightedBuildingSlot(null);
+    setBuildingNotice(null);
     setDrawingCharacter(null);
     setTempLabel('');
     setShowLabelInput(false);
@@ -1751,12 +1950,16 @@ export default function App() {
       label: c.label,
       x: Math.round(c.x),
       y: Math.round(c.y),
-      stair: c.stair,
-      normalizedX: Math.round(c.normalizedX * 1000) / 1000,
+      ...(constellationLayoutType === 'building' && c.slot
+        ? { slot: { floor: c.slot.floor, col: c.slot.col } }
+        : {
+            stair: getCharacterStairV2(c),
+            normalizedX: Math.round(getCharacterNormalizedX(c) * 1000) / 1000
+          }),
       feeling: c.feeling || null,
       memory: c.memory || ''
     }));
-    return JSON.stringify({ uid, layoutVersion: 2, chars: normalized });
+    return JSON.stringify({ uid, layoutVersion: 2, layoutType: constellationLayoutType, chars: normalized });
   };
 
   const saveRuneReading = async (question: string, runeIds: number[]) => {
@@ -1826,8 +2029,8 @@ export default function App() {
           sanitizeCanvasClone(clonedDoc);
           const shareBtn = clonedDoc.querySelector('[title="Invia a Graziamaria"]');
           if (shareBtn) (shareBtn as HTMLElement).style.display = 'none';
-          clonedDoc.querySelectorAll<HTMLElement>('[data-constellation-neutral="true"]').forEach((neutralEl) => {
-            neutralEl.style.display = 'none';
+          clonedDoc.querySelectorAll<HTMLElement>('[data-constellation-neutral="true"], [data-constellation-scene-switcher="true"], [data-building-notice="true"]').forEach((el) => {
+            el.style.display = 'none';
           });
           const main = clonedDoc.querySelector('main');
           if (main) {
@@ -1867,6 +2070,20 @@ export default function App() {
               pillEl.style.left = `${centerXAttr}px`;
               pillEl.style.marginLeft = `${-Math.round(measuredW / 2)}px`;
             }
+          });
+
+          // Evita tagli sulle etichette delle finestre del Palazzo
+          clonedDoc.querySelectorAll<HTMLElement>('[data-building-pill="true"]').forEach((bpEl) => {
+            bpEl.classList.remove('truncate', 'leading-none');
+            bpEl.style.lineHeight = '1.4';
+            bpEl.style.paddingTop = '3px';
+            bpEl.style.paddingBottom = '3px';
+            bpEl.style.height = 'auto';
+            bpEl.style.overflow = 'visible';
+            bpEl.style.transform = 'none';
+            const bw = bpEl.getBoundingClientRect().width || bpEl.offsetWidth || 48;
+            bpEl.style.left = '50%';
+            bpEl.style.marginLeft = `${-Math.round(bw / 2)}px`;
           });
 
           // Evita tagli sui badge numerici (oltre 12 figure)
@@ -1927,8 +2144,21 @@ export default function App() {
     }
   };
 
-  const resolveCharsWithStair = (chars: CharacterType[]): CharacterType[] =>
-    chars.map(char => {
+  const resolveCharsWithStair = (chars: CharacterType[]): CharacterType[] => {
+    const capped = chars.slice(0, MAX_CONSTELLATION_FIGURES);
+    if (constellationLayoutType === 'building') {
+      return capped.map(char => {
+        const slot = char.slot || { floor: 1, col: 0 };
+        const coords = getBuildingSlotRefCoords(slot);
+        return {
+          ...char,
+          slot: { floor: slot.floor, col: slot.col },
+          x: coords.x,
+          y: coords.y
+        };
+      });
+    }
+    return capped.map(char => {
       const stair: 'upper' | 'lower' = char.stair === 'upper' || char.stair === 'lower'
         ? char.stair
         : getCharacterStairV2(char);
@@ -1946,6 +2176,7 @@ export default function App() {
         y: snappedY
       };
     });
+  };
 
   const saveConstellation = async (chars: CharacterType[], screenshotUrl?: string) => {
     if (!user || chars.length === 0) return false;
@@ -1956,15 +2187,16 @@ export default function App() {
     }
 
     try {
-      const savedCharacters = resolvedChars.map(({ id, shape, color, label, x, y, stair, normalizedX, feeling, memory }) => ({
+      const savedCharacters = resolvedChars.map(({ id, shape, color, label, x, y, stair, normalizedX, slot, feeling, memory }) => ({
         id,
         shape,
         color,
         label,
         x,
         y,
-        stair,
-        normalizedX,
+        ...(constellationLayoutType === 'building' && slot
+          ? { slot: { floor: slot.floor, col: slot.col } }
+          : { stair, normalizedX }),
         ...(feeling ? { feeling } : {}),
         ...(memory ? { memory } : {})
       }));
@@ -1976,7 +2208,8 @@ export default function App() {
           nome: userData.nome || '',
           eta: userData.eta || '',
           sesso: userData.sesso || '',
-          layoutVersion: 2
+          layoutVersion: 2,
+          layoutType: constellationLayoutType
         },
         ...(screenshotUrl ? { screenshotUrl } : {}),
         userName: (userProfile?.nome || user.displayName || '').slice(0, 100),
@@ -2162,7 +2395,27 @@ export default function App() {
       'Riprendi costellazione',
       'Hai una costellazione non terminata. Vuoi riprenderla?',
       () => {
-        const restoredChars: CharacterType[] = draft.characters.map((c) => {
+        const restoredLayout: ConstellationLayoutType = draft.layoutType === 'building' ? 'building' : 'stairs';
+        const restoredChars: CharacterType[] = draft.characters.slice(0, MAX_CONSTELLATION_FIGURES).map((c) => {
+          if (restoredLayout === 'building' && c.slot) {
+            const slot = {
+              floor: Math.min(10, Math.max(1, Math.round(c.slot.floor))),
+              col: Math.min(4, Math.max(0, Math.round(c.slot.col)))
+            };
+            const coords = getBuildingSlotRefCoords(slot);
+            return {
+              id: c.id || Math.random().toString(36).substr(2, 9),
+              shape: c.shape,
+              color: c.color,
+              label: c.label || 'Sconosciuto',
+              x: coords.x,
+              y: coords.y,
+              slot,
+              snapSeq: 0,
+              ...(c.feeling ? { feeling: c.feeling } : {}),
+              ...(c.memory ? { memory: c.memory } : {})
+            };
+          }
           const stair: 'upper' | 'lower' = c.stair === 'upper' || c.stair === 'lower' ? c.stair : 'lower';
           const normalizedX = clamp01(Number(c.normalizedX));
           return {
@@ -2179,6 +2432,7 @@ export default function App() {
             ...(c.memory ? { memory: c.memory } : {})
           };
         });
+        setConstellationLayoutType(restoredLayout);
         setCharacters(restoredChars);
         setPendingCharacter(
           draft.pendingCharacter
@@ -2217,6 +2471,7 @@ export default function App() {
     const timer = setTimeout(() => {
       if (isDraftPromptPendingRef.current) return;
       saveConstellationDraft(user?.uid, {
+        layoutType: constellationLayoutType,
         characters,
         userData: {
           nome: userData.nome || '',
@@ -2228,7 +2483,7 @@ export default function App() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [currentPage, characters, pendingCharacter, userData.nome, userData.eta, userData.sesso, user?.uid]);
+  }, [currentPage, constellationLayoutType, characters, pendingCharacter, userData.nome, userData.eta, userData.sesso, user?.uid]);
 
   useEffect(() => {
     let observer: ResizeObserver | null = null;
@@ -2242,7 +2497,8 @@ export default function App() {
       if (stageRef.current?.clientWidth) {
         setStageWidth(stageRef.current.clientWidth);
       } else if (typeof window !== 'undefined') {
-        setStageWidth(Math.min(800, Math.max(280, window.innerWidth - 32)));
+        const fallbackMax = constellationLayoutType === 'building' ? 520 : 800;
+        setStageWidth(Math.min(fallbackMax, Math.max(280, window.innerWidth - 32)));
       }
     };
 
@@ -2270,16 +2526,50 @@ export default function App() {
       if (observer) observer.disconnect();
       window.removeEventListener('resize', updateStageSize);
     };
-  }, [currentPage]);
+  }, [currentPage, constellationLayoutType]);
+
+  const showBuildingNotice = (msg: string) => {
+    setBuildingNotice(msg);
+    if (buildingNoticeTimerRef.current) {
+      clearTimeout(buildingNoticeTimerRef.current);
+    }
+    buildingNoticeTimerRef.current = setTimeout(() => {
+      setBuildingNotice(null);
+    }, 2200);
+  };
+
+  const handleChangeConstellationLayout = (nextLayout: ConstellationLayoutType) => {
+    if (nextLayout === constellationLayoutType) return;
+    if (characters.length > 0) {
+      showConfirm(
+        'Cambia scena',
+        'Cambiando scena le figure posizionate verranno rimosse. Continuare?',
+        () => {
+          setCharacters([]);
+          setWorkflowStep(0);
+          setHighlightedBuildingSlot(null);
+          setBuildingNotice(null);
+          lastSavedConstellationKeyRef.current = null;
+          setConstellationLayoutType(nextLayout);
+        },
+        { confirmLabel: 'Continua', cancelLabel: 'Annulla' }
+      );
+      return;
+    }
+    setConstellationLayoutType(nextLayout);
+    setWorkflowStep(0);
+    setHighlightedBuildingSlot(null);
+    setBuildingNotice(null);
+  };
 
   const handleDraw = () => {
-    if (pendingCharacter) return;
+    if (pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES) return;
     const randomShape = CHARACTER_SHAPES[Math.floor(Math.random() * CHARACTER_SHAPES.length)];
     selectCharacter(randomShape);
   };
 
   const selectCharacter = (char: typeof CHARACTER_SHAPES[number]) => {
-    if (pendingCharacter) return;
+    if (pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES) return;
     setPendingCharacter({
       id: Math.random().toString(36).substr(2, 9),
       shape: char.shape as CharacterType['shape'],
@@ -2484,7 +2774,7 @@ export default function App() {
           'Costellazione salvata',
           screenshotUrl
             ? 'Costellazione salvata. L’immagine è stata inviata anche all’area admin.'
-            : 'Costellazione salvata nell’area admin, ma lo screenshot automatico non è stato generato. Fai ora uno screenshot manuale del piano, poi allegalo e invialo separatamente su WhatsApp a Graziamaria insieme al report.'
+            : 'Costellazione salvata nell’area admin, ma lo screenshot automatico non è stato generato. Fai ora uno screenshot manuale della tavola e invialo a Graziamaria insieme al report.'
         );
       }
     } catch (error: any) {
@@ -2703,12 +2993,15 @@ export default function App() {
     size: 'normal' | 'small' = 'normal',
     densityScale: number = 1,
     badgeNumber?: number,
-    stageWidthOverride?: number
+    stageWidthOverride?: number,
+    scaleOverride?: number
   ) => {
     const activeStageW = typeof stageWidthOverride === 'number' ? stageWidthOverride : stageWidth;
     const isMobile = activeStageW < 640;
     const baseScale = size === 'small' ? 0.6 : 1;
-    const finalScale = (isMobile && size === 'normal' ? 0.75 : baseScale) * (size === 'normal' ? densityScale : 1);
+    const finalScale = typeof scaleOverride === 'number'
+      ? scaleOverride
+      : (isMobile && size === 'normal' ? 0.75 : baseScale) * (size === 'normal' ? densityScale : 1);
     const { bodyWidth, bodyHeight, headSize, isConical, isFlat, isBlock } = getShapeBaseDimensions(shape);
 
     return (
@@ -3032,8 +3325,9 @@ export default function App() {
                           <AdminConstellationPreview
                             readId={read.id}
                             characters={read.characters as CharacterType[]}
-                            renderFigure={(shape, color, densityScale, badgeNumber, previewWidth) =>
-                              renderShape(shape, color, 'normal', densityScale, badgeNumber, previewWidth)
+                            layoutType={read.userData?.layoutType}
+                            renderFigure={(shape, color, densityScale, badgeNumber, previewWidth, scaleOverride) =>
+                              renderShape(shape, color, 'normal', densityScale, badgeNumber, previewWidth, scaleOverride)
                             }
                           />
                         )}
@@ -3065,7 +3359,8 @@ export default function App() {
                             const position = describeCharacterPosition(
                               read.characters as PositionCharacter[],
                               character.id,
-                              read.userData?.layoutVersion
+                              read.userData?.layoutVersion,
+                              read.userData?.layoutType
                             );
                             const isNumbered = Array.isArray(read.characters) && read.characters.length > 12;
                             return (
@@ -3514,7 +3809,8 @@ export default function App() {
                                                   const position = describeCharacterPosition(
                                                     read.characters as PositionCharacter[],
                                                     character.id,
-                                                    read.userData?.layoutVersion
+                                                    read.userData?.layoutVersion,
+                                                    read.userData?.layoutType
                                                   );
                                                   return position ? (
                                                     <>
@@ -3920,7 +4216,7 @@ export default function App() {
                 <div className="flex gap-2">
                   <button 
                     onClick={() => setShowPicker(true)}
-                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1}
+                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= MAX_CONSTELLATION_FIGURES}
                     className="flex items-center justify-center gap-2 bg-[#c2b280] text-white transition-all shadow-md hover:bg-[#b1a170] disabled:opacity-30 disabled:cursor-not-allowed px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                     translate="no"
                   >
@@ -3929,7 +4225,7 @@ export default function App() {
 
                   <button 
                     onClick={handleDraw}
-                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1}
+                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= MAX_CONSTELLATION_FIGURES}
                     className="flex items-center justify-center gap-2 bg-[#e5e0d8] text-[#5a5a40] transition-all shadow-md hover:bg-[#d5d0c8] disabled:opacity-30 disabled:cursor-not-allowed px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                     translate="no"
                   >
@@ -4005,30 +4301,96 @@ export default function App() {
 
             {/* Main Game Area */}
             <main className="flex-1 relative p-3 pt-4 md:p-8 pb-20 md:pb-24 flex flex-col items-center justify-center gap-2 md:gap-4" ref={boardRef}>
-              {/* Share Button */}
+              {/* Invia a Graziamaria Button */}
               <button 
                 onClick={handleShare}
                 disabled={isSharing}
-                className="absolute top-3 left-3 md:top-6 md:left-6 z-40 flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm border border-[#e5e0d8] rounded-xl shadow-sm hover:bg-white transition-all text-[#25D366] active:scale-95 disabled:opacity-50"
+                className="absolute top-3 left-3 md:top-6 md:left-6 z-40 flex items-center gap-2 px-4 sm:px-5 h-10 bg-[#c2b280] text-white rounded-full shadow-md hover:bg-[#b1a170] transition-all active:scale-95 disabled:opacity-50"
                 title="Invia a Graziamaria"
               >
-                <Share2 size={18} className={isSharing ? 'animate-spin' : ''} />
-                <span className="text-[10px] font-black uppercase tracking-wider">
-                  {isSharing ? 'Generazione...' : 'Invia a Graziamaria'}
+                <Send size={15} className={isSharing ? 'animate-pulse' : ''} />
+                <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">
+                  {isSharing ? 'Invio...' : 'Invia a Graziamaria'}
                 </span>
               </button>
 
               {(() => {
-                const useLegendMode = characters.length > 12;
+                const isBuilding = constellationLayoutType === 'building';
+                const useLegendMode = !isBuilding && characters.length > 12;
                 const densityScale = getFigureDensityScale(characters.length);
-                const pillLayout = !useLegendMode ? computePillLayout(characters, stageWidth) : null;
+                const pillLayout = !isBuilding && !useLegendMode ? computePillLayout(characters, stageWidth) : null;
+                const buildingFigureScale = isBuilding ? getBuildingFigureScale(stageWidth) : 1;
+
+                const placePendingInBuildingSlot = (slot: BuildingSlotType) => {
+                  if (!pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES) return;
+                  if (isBuildingSlotOccupied(characters, slot)) {
+                    showBuildingNotice('Finestra occupata');
+                    return;
+                  }
+                  const coords = getBuildingSlotRefCoords(slot);
+                  const newChar: CharacterType = {
+                    id: pendingCharacter.id,
+                    shape: pendingCharacter.shape,
+                    color: pendingCharacter.color,
+                    label: pendingCharacter.label.trim() || 'Sconosciuto',
+                    x: coords.x,
+                    y: coords.y,
+                    slot: { floor: slot.floor, col: slot.col },
+                    snapSeq: 0
+                  };
+                  setCharacters(prev => [...prev, newChar]);
+                  setPendingCharacter(null);
+                  setHighlightedBuildingSlot(null);
+                  setBuildingNotice(null);
+                };
 
                 return (
                   <div
                     ref={constellationWorkAreaRef}
-                    className="w-full max-w-[800px] mt-11 md:mt-10 scroll-mt-2 flex flex-col items-center select-none"
+                    className={`w-full ${isBuilding ? 'max-w-[520px]' : 'max-w-[800px]'} mt-11 md:mt-10 scroll-mt-2 flex flex-col items-center select-none`}
                   >
-                    {/* Area neutra per il pupazzo appena generato (fuori dai gradini, esclusa da screenshot/salvataggio/conteggio) */}
+                    {/* Scelta scena sopra la tavola */}
+                    <div
+                      data-constellation-scene-switcher="true"
+                      className="mb-3 md:mb-4 inline-flex items-center p-1 rounded-full bg-white/90 border border-[#e5e0d8] shadow-sm"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleChangeConstellationLayout('stairs')}
+                        className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
+                          !isBuilding
+                            ? 'bg-[#c2b280] text-white shadow-sm'
+                            : 'text-[#5a5a40] hover:bg-[#f8f5f0]'
+                        }`}
+                        translate="no"
+                      >
+                        Gradini
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleChangeConstellationLayout('building')}
+                        className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
+                          isBuilding
+                            ? 'bg-[#c2b280] text-white shadow-sm'
+                            : 'text-[#5a5a40] hover:bg-[#f8f5f0]'
+                        }`}
+                        translate="no"
+                      >
+                        Palazzo
+                      </button>
+                    </div>
+
+                    {/* Avviso breve interno per Palazzo */}
+                    {isBuilding && buildingNotice && (
+                      <div
+                        data-building-notice="true"
+                        className="mb-2 px-4 py-1.5 rounded-full bg-[#4a3f35] text-white text-xs font-bold shadow-md"
+                      >
+                        {buildingNotice}
+                      </div>
+                    )}
+
+                    {/* Area neutra per il pupazzo appena generato (fuori dalla tavola, esclusa da screenshot/salvataggio/conteggio) */}
                     {pendingCharacter && (
                       <div
                         ref={neutralAreaRef}
@@ -4043,7 +4405,7 @@ export default function App() {
                               Pupazzo da posizionare
                             </span>
                             <span className="text-[10px] md:text-[11px] text-[#4a3f35]/70">
-                              Trascinalo sul gradino scelto
+                              {isBuilding ? 'Tocca o trascinalo su una finestra libera' : 'Trascinalo sul gradino scelto'}
                             </span>
                           </div>
                           <button
@@ -4051,6 +4413,7 @@ export default function App() {
                             onClick={() => {
                               setPendingCharacter(null);
                               setIsDraggingPending(false);
+                              setHighlightedBuildingSlot(null);
                             }}
                             className="shrink-0 p-1 md:p-1.5 rounded-full text-[#4a3f35]/70 hover:text-red-600 hover:bg-red-50 transition-colors"
                             aria-label="Rimuovi pupazzo da posizionare"
@@ -4067,8 +4430,8 @@ export default function App() {
                               drag
                               dragMomentum={false}
                               onDragStart={() => setIsDraggingPending(true)}
-                              onDragEnd={() => {
-                                setIsDraggingPending(false);
+                              onDrag={() => {
+                                if (!isBuilding) return;
                                 const figEl = boardRef.current?.querySelector(`[data-pending-figure-id="${pendingCharacter.id}"]`) as HTMLElement | null;
                                 const stageEl = stageRef.current;
                                 if (!figEl || !stageEl) return;
@@ -4077,6 +4440,51 @@ export default function App() {
                                 if (stageRect.width <= 0 || stageRect.height <= 0) return;
 
                                 const centerX = (figRect.left + figRect.right) / 2;
+                                const centerY = (figRect.top + figRect.bottom) / 2;
+                                const xPct = ((centerX - stageRect.left) / stageRect.width) * 100;
+                                const yPct = ((centerY - stageRect.top) / stageRect.height) * 100;
+
+                                if (xPct < -5 || xPct > 105 || yPct < -3 || yPct > 103) {
+                                  setHighlightedBuildingSlot(prev => (prev ? null : prev));
+                                  return;
+                                }
+
+                                const nearest = findNearestFreeBuildingSlot(xPct, yPct, characters);
+                                setHighlightedBuildingSlot(prev => {
+                                  if (!nearest && !prev) return prev;
+                                  if (nearest && prev && nearest.floor === prev.floor && nearest.col === prev.col) return prev;
+                                  return nearest;
+                                });
+                              }}
+                              onDragEnd={() => {
+                                setIsDraggingPending(false);
+                                setHighlightedBuildingSlot(null);
+                                const figEl = boardRef.current?.querySelector(`[data-pending-figure-id="${pendingCharacter.id}"]`) as HTMLElement | null;
+                                const stageEl = stageRef.current;
+                                if (!figEl || !stageEl) return;
+                                const figRect = figEl.getBoundingClientRect();
+                                const stageRect = stageEl.getBoundingClientRect();
+                                if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+                                const centerX = (figRect.left + figRect.right) / 2;
+                                if (isBuilding) {
+                                  const centerY = (figRect.top + figRect.bottom) / 2;
+                                  const xPct = ((centerX - stageRect.left) / stageRect.width) * 100;
+                                  const yPct = ((centerY - stageRect.top) / stageRect.height) * 100;
+                                  if (xPct < -5 || xPct > 105 || yPct < -3 || yPct > 103) {
+                                    setPendingCharacter(prev => prev ? { ...prev, snapSeq: prev.snapSeq + 1 } : null);
+                                    return;
+                                  }
+                                  const freeSlot = findNearestFreeBuildingSlot(xPct, yPct, characters);
+                                  if (!freeSlot) {
+                                    showBuildingNotice('Finestra occupata');
+                                    setPendingCharacter(prev => prev ? { ...prev, snapSeq: prev.snapSeq + 1 } : null);
+                                    return;
+                                  }
+                                  placePendingInBuildingSlot(freeSlot);
+                                  return;
+                                }
+
                                 const baseBottomY = figRect.bottom;
                                 const xRatio = (centerX - stageRect.left) / stageRect.width;
                                 const yRatio = (baseBottomY - stageRect.top) / stageRect.height;
@@ -4190,6 +4598,277 @@ export default function App() {
                       </div>
                     )}
 
+                    {isBuilding ? (
+                      <>
+                        {/* Tavola Palazzo (1:2, max 520px desktop, 10 piani x 5 finestre) */}
+                        <div
+                          ref={stageRef}
+                          data-constellation-stage="true"
+                          className="relative w-full aspect-[1/2] select-none"
+                        >
+                          <img
+                            src={BUILDING_IMAGE_URL}
+                            alt="Palazzo Costellazione"
+                            className="relative z-10 w-full h-full object-contain pointer-events-none select-none"
+                          />
+
+                          {/* 50 finestre interattive (piani 1..10, col 0..4) */}
+                          {BUILDING_FLOORS.map(floor =>
+                            BUILDING_COLS.map(col => {
+                              const slot = { floor, col };
+                              const { xPct, yPct } = getBuildingSlotCenterPct(slot);
+                              const occupant = characters.find(
+                                c => c.slot?.floor === floor && c.slot?.col === col
+                              );
+                              const isHighlighted =
+                                highlightedBuildingSlot?.floor === floor &&
+                                highlightedBuildingSlot?.col === col;
+
+                              return (
+                                <button
+                                  key={`window-${floor}-${col}`}
+                                  type="button"
+                                  aria-label={`Piano ${floor}, finestra ${col + 1}${occupant ? ` (${occupant.label})` : ' libera'}`}
+                                  onClick={() => {
+                                    if (!pendingCharacter) return;
+                                    if (occupant) {
+                                      showBuildingNotice('Finestra occupata');
+                                      return;
+                                    }
+                                    placePendingInBuildingSlot(slot);
+                                  }}
+                                  className={`absolute transition-all rounded-t-full rounded-b-sm ${
+                                    pendingCharacter ? 'z-40 cursor-pointer' : 'z-20 pointer-events-none'
+                                  } ${
+                                    isHighlighted
+                                      ? 'ring-2 ring-[#c2b280] bg-[#c2b280]/30 shadow-[0_0_16px_rgba(194,178,128,0.85)]'
+                                      : pendingCharacter && !occupant
+                                        ? 'hover:bg-[#c2b280]/20 hover:ring-1 hover:ring-[#c2b280]/70'
+                                        : ''
+                                  }`}
+                                  style={{
+                                    left: `${xPct}%`,
+                                    top: `${yPct}%`,
+                                    width: `${BUILDING_WINDOW_WIDTH_PCT}%`,
+                                    height: `${BUILDING_WINDOW_HEIGHT_PCT}%`,
+                                    transform: 'translate(-50%, -50%)'
+                                  }}
+                                />
+                              );
+                            })
+                          )}
+
+                          {/* Pupazzi posizionati nelle finestre */}
+                          {characters.map((char) => {
+                            if (!char.slot) return null;
+                            const { xPct, yPct } = getBuildingSlotCenterPct(char.slot);
+                            const isDragging = draggingCharId === char.id;
+                            const feelingBorder =
+                              char.feeling === 'piacevole'
+                                ? '#4ade80'
+                                : char.feeling === 'spiacevole'
+                                  ? '#f87171'
+                                  : '#e5e0d8';
+
+                            return (
+                              <div
+                                key={char.id}
+                                className={`absolute ${isDragging ? 'z-50' : 'z-30'}`}
+                                style={{
+                                  left: `${xPct}%`,
+                                  top: `${yPct}%`,
+                                  width: `${BUILDING_WINDOW_WIDTH_PCT}%`,
+                                  height: `${BUILDING_WINDOW_HEIGHT_PCT}%`,
+                                  transform: 'translate(-50%, -50%)'
+                                }}
+                              >
+                                <motion.div
+                                  key={`${char.id}-${char.snapSeq || 0}`}
+                                  drag={workflowStep === 0 || char.label.toLowerCase() === 'io'}
+                                  dragMomentum={false}
+                                  initial={char.snapSeq ? false : { scale: 0.5, opacity: 0 }}
+                                  animate={{ scale: 1, opacity: 1 }}
+                                  onPointerDown={(e) => {
+                                    charPointerDownRef.current = { id: char.id, x: e.clientX, y: e.clientY };
+                                    activeDraggedCharRef.current = null;
+                                  }}
+                                  onDragStart={() => {
+                                    activeDraggedCharRef.current = char.id;
+                                    setDraggingCharId(char.id);
+                                  }}
+                                  onDrag={() => {
+                                    const figEl = boardRef.current?.querySelector(`[data-building-figure-id="${char.id}"]`) as HTMLElement | null;
+                                    const stageEl = stageRef.current;
+                                    if (!figEl || !stageEl) return;
+                                    const figRect = figEl.getBoundingClientRect();
+                                    const stageRect = stageEl.getBoundingClientRect();
+                                    if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+                                    const centerX = (figRect.left + figRect.right) / 2;
+                                    const centerY = (figRect.top + figRect.bottom) / 2;
+                                    const xPctNow = ((centerX - stageRect.left) / stageRect.width) * 100;
+                                    const yPctNow = ((centerY - stageRect.top) / stageRect.height) * 100;
+                                    if (xPctNow < -5 || xPctNow > 105 || yPctNow < -3 || yPctNow > 103) {
+                                      setHighlightedBuildingSlot(prev => (prev ? null : prev));
+                                      return;
+                                    }
+                                    const nearest = findNearestFreeBuildingSlot(xPctNow, yPctNow, characters, char.id);
+                                    setHighlightedBuildingSlot(prev => {
+                                      if (!nearest && !prev) return prev;
+                                      if (nearest && prev && nearest.floor === prev.floor && nearest.col === prev.col) return prev;
+                                      return nearest;
+                                    });
+                                  }}
+                                  onDragEnd={() => {
+                                    lastCharDragEndRef.current = { id: char.id, at: Date.now() };
+                                    activeDraggedCharRef.current = null;
+                                    setDraggingCharId(null);
+                                    setHighlightedBuildingSlot(null);
+
+                                    const figEl = boardRef.current?.querySelector(`[data-building-figure-id="${char.id}"]`) as HTMLElement | null;
+                                    const stageEl = stageRef.current;
+                                    if (!figEl || !stageEl) return;
+                                    const figRect = figEl.getBoundingClientRect();
+                                    const stageRect = stageEl.getBoundingClientRect();
+                                    if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+                                    const centerX = (figRect.left + figRect.right) / 2;
+                                    const centerY = (figRect.top + figRect.bottom) / 2;
+                                    const xPctNow = ((centerX - stageRect.left) / stageRect.width) * 100;
+                                    const yPctNow = ((centerY - stageRect.top) / stageRect.height) * 100;
+
+                                    if (xPctNow < -5 || xPctNow > 105 || yPctNow < -3 || yPctNow > 103) {
+                                      setCharacters(prev => prev.map(c =>
+                                        c.id === char.id ? { ...c, snapSeq: (c.snapSeq || 0) + 1 } : c
+                                      ));
+                                      return;
+                                    }
+
+                                    const nextSlot = findNearestFreeBuildingSlot(xPctNow, yPctNow, characters, char.id);
+                                    if (!nextSlot) {
+                                      showBuildingNotice('Finestra occupata');
+                                      setCharacters(prev => prev.map(c =>
+                                        c.id === char.id ? { ...c, snapSeq: (c.snapSeq || 0) + 1 } : c
+                                      ));
+                                      return;
+                                    }
+
+                                    const coords = getBuildingSlotRefCoords(nextSlot);
+                                    setCharacters(prev => prev.map(c =>
+                                      c.id === char.id
+                                        ? {
+                                            ...c,
+                                            slot: { floor: nextSlot.floor, col: nextSlot.col },
+                                            x: coords.x,
+                                            y: coords.y,
+                                            snapSeq: (c.snapSeq || 0) + 1
+                                          }
+                                        : c
+                                    ));
+                                  }}
+                                  onClick={(e) => {
+                                    if (pendingCharacter) return;
+                                    if (activeDraggedCharRef.current === char.id) return;
+                                    if (lastCharDragEndRef.current?.id === char.id && Date.now() - lastCharDragEndRef.current.at < 300) {
+                                      return;
+                                    }
+                                    const start = charPointerDownRef.current;
+                                    if (start && start.id === char.id && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) {
+                                      return;
+                                    }
+                                    handleCharacterClick(char);
+                                  }}
+                                  className={`relative w-full h-full group ${
+                                    (workflowStep === 0 || char.label.toLowerCase() === 'io')
+                                      ? 'cursor-grab active:cursor-grabbing'
+                                      : 'cursor-pointer'
+                                  }`}
+                                  style={{
+                                    opacity: isDragging ? 0.55 : 1,
+                                    touchAction: (workflowStep === 0 || char.label.toLowerCase() === 'io') ? 'none' : 'auto',
+                                    transition: 'opacity 120ms ease'
+                                  }}
+                                >
+                                  <div
+                                    data-building-figure-id={char.id}
+                                    className="absolute left-1/2 bottom-[14%] flex justify-center hover:ring-2 hover:ring-[#c2b280]/80 rounded-xl transition-all"
+                                    style={{ transform: 'translateX(-50%)' }}
+                                  >
+                                    {renderShape(
+                                      char.shape,
+                                      char.color,
+                                      'normal',
+                                      1,
+                                      undefined,
+                                      undefined,
+                                      buildingFigureScale
+                                    )}
+                                  </div>
+                                  <div
+                                    data-building-pill="true"
+                                    className="absolute left-1/2 -bottom-1.5 z-20 px-1.5 py-0.5 bg-white/95 rounded-full border shadow-sm text-[8px] sm:text-[9px] font-bold text-[#4a3f35] whitespace-nowrap max-w-[130%] truncate pointer-events-none"
+                                    style={{
+                                      transform: 'translateX(-50%)',
+                                      borderColor: feelingBorder,
+                                      lineHeight: 1.3
+                                    }}
+                                    translate="no"
+                                  >
+                                    <span>{char.label}</span>
+                                    {char.feeling && (
+                                      <span className="ml-0.5">{char.feeling === 'piacevole' ? '❤️' : '💔'}</span>
+                                    )}
+                                  </div>
+                                  {workflowStep === 0 && !pendingCharacter && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeCharacter(char.id);
+                                      }}
+                                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md pointer-events-auto z-30"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  )}
+                                </motion.div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {characters.length > 0 && (
+                          <div
+                            data-constellation-legend="true"
+                            className="mt-4 w-full bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl px-4 py-3 shadow-sm text-[#4a3f35]"
+                            translate="no"
+                          >
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs">
+                              {characters.map((char) => (
+                                <button
+                                  key={`building-legend-${char.id}`}
+                                  type="button"
+                                  data-constellation-legend-item="true"
+                                  onClick={() => handleCharacterClick(char)}
+                                  className="flex items-center gap-1.5 text-left truncate rounded-lg px-1.5 py-1 hover:bg-white cursor-pointer"
+                                >
+                                  <span className="font-bold text-[#5a5a40] shrink-0">
+                                    {char.slot ? `P${char.slot.floor}` : ''}
+                                  </span>
+                                  <span className="truncate font-medium">{char.label}</span>
+                                  {char.feeling && (
+                                    <span className="shrink-0">
+                                      {char.feeling === 'piacevole' ? '❤️' : '💔'}
+                                    </span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
                     {/* Wrapper con bande pillole (<=12) + fili SVG 1px + stage 16:9 */}
                     <div
                       className="relative w-full flex flex-col"
@@ -4244,8 +4923,10 @@ export default function App() {
 
                         {/* Draggable Characters */}
                         {characters.map((char, charIndex) => {
-                          const xPct = getStairXRatio(char.stair, char.normalizedX) * 100;
-                          const yPct = STAIR_GEOMETRY[char.stair].yRatio * 100;
+                          const charStair = getCharacterStairV2(char);
+                          const charNormX = getCharacterNormalizedX(char);
+                          const xPct = getStairXRatio(charStair, charNormX) * 100;
+                          const yPct = STAIR_GEOMETRY[charStair].yRatio * 100;
                           const isDragging = draggingCharId === char.id;
                           return (
                             <div
@@ -4285,8 +4966,8 @@ export default function App() {
 
                                   const snapped = snapStageRatioToStair(xRatio, yRatio);
                                   const sameStairOthers = characters
-                                    .filter(other => other.id !== char.id && other.stair === snapped.stair)
-                                    .map(other => other.normalizedX);
+                                    .filter(other => other.id !== char.id && getCharacterStairV2(other) === snapped.stair)
+                                    .map(other => getCharacterNormalizedX(other));
                                   const finalNormalizedX = nudgeNormalizedXOnStair(
                                     snapped.stair,
                                     snapped.normalizedX,
@@ -4444,6 +5125,8 @@ export default function App() {
                           ))}
                         </div>
                       </div>
+                    )}
+                      </>
                     )}
                   </div>
                 );
@@ -5346,7 +6029,7 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2 sm:gap-4 max-h-[60vh] overflow-y-auto p-1 sm:p-2">
-                {CHARACTER_SHAPES.map((char, index) => (
+                {CHARACTER_PICKER_SHAPES.map((char, index) => (
                   <button
                     key={index}
                     onClick={() => selectCharacter(char)}
