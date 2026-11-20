@@ -361,12 +361,14 @@ function describeCharacterPosition(
     character => (character.label || '').trim().toLowerCase() === 'io'
   );
   let ioRelation: string | null = null;
-  if (ioChar && ioChar.id !== target.id) {
-    const ioNormX = getCharacterNormalizedX(ioChar);
-    const diffNorm = targetNormX - ioNormX;
-    if (Math.abs(diffNorm) < 0.04) {
+  if (!ioChar) {
+    ioRelation = 'riferimento a Io: non presente';
+  } else if (ioChar.id !== target.id) {
+    const ioStageX = getStairXRatio(getCharacterStairV2(ioChar), getCharacterNormalizedX(ioChar));
+    const diffStageX = targetStageX - ioStageX;
+    if (Math.abs(diffStageX) < 0.04) {
       ioRelation = 'in linea con Io';
-    } else if (diffNorm < 0) {
+    } else if (diffStageX < 0) {
       // Prospettiva di Io (frontale allo schermo): sinistra sullo schermo = destra di Io
       ioRelation = 'alla destra di Io';
     } else {
@@ -419,10 +421,12 @@ function describeCharacterPosition(
     parts.push(`sovrapposta a ${names}`);
   } else {
     const neighborParts: string[] = [];
-    if (leftNeighbor) neighborParts.push(`${leftNeighbor.label || 'Senza nome'} (a sinistra)`);
-    if (rightNeighbor) neighborParts.push(`${rightNeighbor.label || 'Senza nome'} (a destra)`);
-    if (neighborParts.length > 0) {
-      parts.push(`accanto a ${neighborParts.join(' e ')}`);
+    if (rightNeighbor) neighborParts.push(`${rightNeighbor.label || 'Senza nome'} alla sua destra`);
+    if (leftNeighbor) neighborParts.push(`${leftNeighbor.label || 'Senza nome'} alla sua sinistra`);
+    if (neighborParts.length === 1) {
+      parts.push(`vicino: ${neighborParts[0]}`);
+    } else if (neighborParts.length > 1) {
+      parts.push(`vicini: ${neighborParts.join(', ')}`);
     }
     parts.push(`vicinanza: ${proximity}`);
   }
@@ -1915,9 +1919,16 @@ export default function App() {
   const boardRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const neutralAreaRef = useRef<HTMLDivElement>(null);
+  const constellationWorkAreaRef = useRef<HTMLDivElement>(null);
   const [draggingCharId, setDraggingCharId] = useState<string | null>(null);
   const [stageWidth, setStageWidth] = useState<number>(() =>
     typeof window !== 'undefined' && window.innerWidth < 640 ? 340 : 800
+  );
+  const [isMobileViewport, setIsMobileViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  );
+  const [showCostellazioniHelp, setShowCostellazioniHelp] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 768 : true
   );
 
   useEffect(() => {
@@ -1926,6 +1937,9 @@ export default function App() {
     let timerId: ReturnType<typeof setTimeout> | null = null;
 
     const updateStageSize = () => {
+      if (typeof window !== 'undefined') {
+        setIsMobileViewport(window.innerWidth < 768);
+      }
       if (stageRef.current?.clientWidth) {
         setStageWidth(stageRef.current.clientWidth);
       } else if (typeof window !== 'undefined') {
@@ -1979,8 +1993,12 @@ export default function App() {
     setShowPicker(false);
     setTempLabel('');
     setTimeout(() => {
-      neutralAreaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 60);
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        (constellationWorkAreaRef.current || neutralAreaRef.current)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        neutralAreaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 80);
   };
 
   const drawRune = () => {
@@ -2352,20 +2370,21 @@ export default function App() {
     const headerLine = `Costellazione di ${nomeStr}${etaStr ? `, ${etaStr}` : ''} — lettura dal punto di vista di Io`;
 
     const ioChar = resolved.find(c => (c.label || '').trim().toLowerCase() === 'io');
-    const ioNormX = ioChar ? getCharacterNormalizedX(ioChar) : null;
+    const ioStageX = ioChar ? getStairXRatio(getCharacterStairV2(ioChar), getCharacterNormalizedX(ioChar)) : null;
 
     const baseFigureLines = resolved.map((char) => {
       const label = (char.label || 'Senza nome').trim() || 'Senza nome';
       const stairText = char.stair === 'upper' ? 'Gradino superiore' : 'Gradino inferiore';
-      let ioPosText = 'Io non presente';
+      let ioPosText = 'riferimento a Io: non presente';
       if (ioChar) {
         if (char.id === ioChar.id) {
           ioPosText = 'punto di riferimento (Io)';
-        } else if (ioNormX !== null) {
-          const diffNorm = getCharacterNormalizedX(char) - ioNormX;
-          if (Math.abs(diffNorm) < 0.04) {
+        } else if (ioStageX !== null) {
+          const charStageX = getStairXRatio(getCharacterStairV2(char), getCharacterNormalizedX(char));
+          const diffStageX = charStageX - ioStageX;
+          if (Math.abs(diffStageX) < 0.04) {
             ioPosText = 'in linea con Io';
-          } else if (diffNorm < 0) {
+          } else if (diffStageX < 0) {
             ioPosText = 'alla destra di Io';
           } else {
             ioPosText = 'alla sinistra di Io';
@@ -2477,7 +2496,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8f5f0] font-sans text-[#4a3f35] overflow-hidden flex flex-col" translate="no">
+    <div className={`min-h-screen bg-[#f8f5f0] font-sans text-[#4a3f35] ${currentPage === 'costellazioni' ? 'overflow-x-clip' : 'overflow-hidden'} flex flex-col`} translate="no">
       {/* Auth Bar */}
       <div className="bg-[#4a3f35] text-white px-4 sm:px-6 py-3 flex flex-wrap justify-between items-center text-[10px] uppercase tracking-widest z-[100] shadow-md gap-y-2">
         <div className="flex items-center gap-2">
@@ -2612,6 +2631,9 @@ export default function App() {
                             </button>
                           </div>
                         </div>
+                        <p className="text-[10px] italic text-[#8a7954] bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl px-3 py-1.5 mb-3">
+                          Lettura dal punto di vista di Io: destra e sinistra sono quelle del pupazzo, opposte a quelle dello schermo.
+                        </p>
                         {read.screenshotUrl ? (
                           <button
                             type="button"
@@ -2870,6 +2892,9 @@ export default function App() {
                                       {read.question && <p className="text-[10px] italic opacity-80 mb-2">"{read.question}"</p>}
                                       {read.type === 'constellation' && Array.isArray(read.characters) ? (
                                         <div className="space-y-2 text-[10px] font-medium opacity-70 leading-relaxed">
+                                          <p className="text-[10px] italic text-[#8a7954] bg-white border border-[#e5e0d8] rounded-lg px-2.5 py-1">
+                                            Lettura dal punto di vista di Io: destra e sinistra sono quelle del pupazzo, opposte a quelle dello schermo.
+                                          </p>
                                           {read.userData && (
                                             <p><strong>Dati sessione:</strong> {read.userData.nome || read.userName || 'N/D'}{read.userData.eta ? `, ${read.userData.eta} anni` : ''}{read.userData.sesso ? `, ${read.userData.sesso}` : ''}{read.userData.domandaRune ? ` — ${read.userData.domandaRune}` : ''}</p>
                                           )}
@@ -3292,13 +3317,27 @@ export default function App() {
 
               {/* Instructions Box */}
               <div 
-                className="w-full max-w-3xl p-4 bg-[#fdfbf7] rounded-2xl border border-[#e5e0d8] shadow-sm text-center"
+                className="w-full max-w-3xl p-3 md:p-4 bg-[#fdfbf7] rounded-2xl border border-[#e5e0d8] shadow-sm text-center"
                 style={{ color: '#4a3f35', fontSize: '10px', lineHeight: '1.5', fontWeight: '500' }}
               >
-                <div className="font-bold text-[#5a5a40] mb-1 tracking-widest uppercase" style={{ fontSize: '9px' }}>COME FUNZIONA?</div>
-                <p className="opacity-90 text-justify" style={{ color: '#100b06' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowCostellazioniHelp(prev => !prev)}
+                  aria-expanded={showCostellazioniHelp}
+                  className="md:hidden w-full flex items-center justify-between font-bold text-[#5a5a40] tracking-widest uppercase"
+                  style={{ fontSize: '9px' }}
+                >
+                  <span>COME FUNZIONA?</span>
+                  <span className="flex items-center gap-1 text-[9px] text-[#8a7954]">
+                    {showCostellazioniHelp ? 'Chiudi' : 'Leggi'}
+                    <ChevronDown size={13} className={`transition-transform ${showCostellazioniHelp ? 'rotate-180' : ''}`} />
+                  </span>
+                </button>
+                <div className="hidden md:block font-bold text-[#5a5a40] mb-1 tracking-widest uppercase" style={{ fontSize: '9px' }}>COME FUNZIONA?</div>
+                <p className={`${showCostellazioniHelp ? 'block mt-2' : 'hidden'} md:block md:mt-0 opacity-90 text-justify`} style={{ color: '#100b06' }}>
                   Avrai a disposizione 30 "personaggi" di varie misure, colori e forme. Cliccando sul bottone "Scegli" potrai visualizzarli tutti e sceglierli per poi posizionarne quanti ne vuoi, uno per uno. Cliccando su "Casuale" il sistema sceglierà il personaggio che dovrai, poi, nominare e posizionare.<br />
-                  Clicca il "bottone" che hai deciso (Scegli o Casuale), nomina il personaggio, trascina il personaggio e posizionalo dove vuoi, puoi sceglierne quanti ne vuoi. Quando hai finito fai uno screenshot. Poi clicca sul bottone "Termina Posizionamento" e segui le istruzioni successive. Quando avrai terminato, potrai salvare il tutto nel report, scaricarlo e inviarlo a Graziamaria.
+                  Clicca il "bottone" che hai deciso (Scegli o Casuale), nomina il personaggio, trascina il personaggio e posizionalo dove vuoi, puoi sceglierne quanti ne vuoi. Quando hai finito fai uno screenshot. Poi clicca sul bottone "Termina Posizionamento" e segui le istruzioni successive. Quando avrai terminato, potrai salvare il tutto nel report, scaricarlo e inviarlo a Graziamaria.<br />
+                  Quando descrivi dove si trova una figura (nelle memorie o nei messaggi), usa destra e sinistra dal punto di vista del pupazzo Io, non dello schermo.
                 </p>
               </div>
               
@@ -3389,12 +3428,12 @@ export default function App() {
             </header>
 
             {/* Main Game Area */}
-            <main className="flex-1 relative p-4 sm:p-8 pb-20 sm:pb-24 flex flex-col items-center justify-center gap-2 sm:gap-4" ref={boardRef}>
+            <main className="flex-1 relative p-3 pt-4 md:p-8 pb-20 md:pb-24 flex flex-col items-center justify-center gap-2 md:gap-4" ref={boardRef}>
               {/* Share Button */}
               <button 
                 onClick={handleShare}
                 disabled={isSharing}
-                className="absolute top-4 left-4 sm:top-6 sm:left-6 z-40 flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm border border-[#e5e0d8] rounded-xl shadow-sm hover:bg-white transition-all text-[#25D366] active:scale-95 disabled:opacity-50"
+                className="absolute top-3 left-3 md:top-6 md:left-6 z-40 flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm border border-[#e5e0d8] rounded-xl shadow-sm hover:bg-white transition-all text-[#25D366] active:scale-95 disabled:opacity-50"
                 title="Invia a Graziamaria"
               >
                 <Share2 size={18} className={isSharing ? 'animate-spin' : ''} />
@@ -3409,22 +3448,25 @@ export default function App() {
                 const pillLayout = !useLegendMode ? computePillLayout(characters, stageWidth) : null;
 
                 return (
-                  <div className="w-full max-w-[800px] mt-14 sm:mt-10 flex flex-col items-center select-none">
+                  <div
+                    ref={constellationWorkAreaRef}
+                    className="w-full max-w-[800px] mt-11 md:mt-10 scroll-mt-2 flex flex-col items-center select-none"
+                  >
                     {/* Area neutra per il pupazzo appena generato (fuori dai gradini, esclusa da screenshot/salvataggio/conteggio) */}
                     {pendingCharacter && (
                       <div
                         ref={neutralAreaRef}
                         data-constellation-neutral="true"
-                        className={`w-full max-w-xl mb-4 sm:mb-6 p-3 sm:p-4 rounded-2xl border-2 border-dashed border-[#c2b280] bg-[#fdfbf7] shadow-sm relative ${
+                        className={`w-full max-w-xl mb-2 md:mb-6 p-2 md:p-4 rounded-xl md:rounded-2xl border-2 border-dashed border-[#c2b280] bg-[#fdfbf7]/95 backdrop-blur-sm md:bg-[#fdfbf7] shadow-sm sticky top-2 md:static max-h-[30vh] md:max-h-none ${
                           isDraggingPending ? 'z-[70]' : 'z-40'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[11px] sm:text-xs font-bold uppercase tracking-widest text-[#8a7954]">
+                        <div className="flex items-center justify-between gap-2 mb-1.5 md:mb-3">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
+                            <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider md:tracking-widest text-[#8a7954]">
                               Pupazzo da posizionare
                             </span>
-                            <span className="text-[11px] text-[#4a3f35]/70">
+                            <span className="text-[10px] md:text-[11px] text-[#4a3f35]/70">
                               Trascinalo sul gradino scelto
                             </span>
                           </div>
@@ -3434,16 +3476,16 @@ export default function App() {
                               setPendingCharacter(null);
                               setIsDraggingPending(false);
                             }}
-                            className="p-1.5 rounded-full text-[#4a3f35]/60 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            className="shrink-0 p-1 md:p-1.5 rounded-full text-[#4a3f35]/70 hover:text-red-600 hover:bg-red-50 transition-colors"
                             aria-label="Rimuovi pupazzo da posizionare"
                             title="Rimuovi pupazzo"
                           >
-                            <X size={16} />
+                            <X size={15} className="md:w-4 md:h-4" />
                           </button>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-5">
-                          <div className="relative flex items-center justify-center min-w-[96px] min-h-[112px] px-4 py-3 rounded-2xl bg-white ring-4 ring-[#c2b280]/45 shadow-[0_0_24px_rgba(194,178,128,0.55)]">
+                        <div className="flex flex-row items-center gap-2.5 md:gap-5">
+                          <div className="relative shrink-0 flex items-center justify-center w-14 h-16 md:w-auto md:h-auto md:min-w-[96px] md:min-h-[112px] p-1 md:px-4 md:py-3 rounded-xl md:rounded-2xl bg-white ring-2 md:ring-4 ring-[#c2b280]/45 shadow-[0_0_16px_rgba(194,178,128,0.45)] md:shadow-[0_0_24px_rgba(194,178,128,0.55)]">
                             <motion.div
                               key={`pending-${pendingCharacter.id}-${pendingCharacter.snapSeq}`}
                               drag
@@ -3507,19 +3549,19 @@ export default function App() {
                                 {renderShape(
                                   pendingCharacter.shape,
                                   pendingCharacter.color,
-                                  'normal',
+                                  isMobileViewport ? 'small' : 'normal',
                                   getFigureDensityScale(characters.length + 1)
                                 )}
                               </div>
                             </motion.div>
                           </div>
 
-                          <div className="flex-1 w-full space-y-2 text-left">
+                          <div className="flex-1 min-w-0 space-y-1 md:space-y-2 text-left">
                             <label
                               htmlFor="pending-character-label"
-                              className="block text-[10px] font-bold uppercase tracking-widest text-[#5a5a40]"
+                              className="block text-[9px] md:text-[10px] font-bold uppercase tracking-wider md:tracking-widest text-[#5a5a40]"
                             >
-                              Nome / Ruolo del personaggio
+                              Nome / ruolo
                             </label>
                             <input
                               id="pending-character-label"
@@ -3530,15 +3572,15 @@ export default function App() {
                                 setPendingCharacter(prev => prev ? { ...prev, label: val } : null);
                               }}
                               placeholder="Chi rappresenta per te? (es. Mamma)"
-                              className="w-full px-3.5 py-2.5 bg-white border border-[#e5e0d8] rounded-xl text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280]"
+                              className="w-full px-3 py-1.5 md:px-3.5 md:py-2.5 bg-white border border-[#e5e0d8] rounded-xl text-xs md:text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280]"
                             />
-                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                            <div className="hidden md:flex flex-wrap gap-1.5 pt-0.5">
                               {PREDEFINED_LABELS.slice(0, 8).map(label => (
                                 <button
                                   key={`pending-preset-${label}`}
                                   type="button"
                                   onClick={() => setPendingCharacter(prev => prev ? { ...prev, label } : null)}
-                                  className={`px-2.5 py-1 text-[10px] sm:text-xs rounded-full border transition-colors ${
+                                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
                                     pendingCharacter.label === label
                                       ? 'bg-[#c2b280] text-white border-[#c2b280]'
                                       : 'bg-white hover:bg-[#f2ede4] text-[#4a3f35] border-[#e5e0d8]'
@@ -3550,6 +3592,24 @@ export default function App() {
                               ))}
                             </div>
                           </div>
+                        </div>
+
+                        <div className="md:hidden mt-1.5 flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
+                          {PREDEFINED_LABELS.slice(0, 8).map(label => (
+                            <button
+                              key={`pending-preset-mobile-${label}`}
+                              type="button"
+                              onClick={() => setPendingCharacter(prev => prev ? { ...prev, label } : null)}
+                              className={`shrink-0 whitespace-nowrap px-2.5 py-0.5 text-[10px] rounded-full border transition-colors ${
+                                pendingCharacter.label === label
+                                  ? 'bg-[#c2b280] text-white border-[#c2b280]'
+                                  : 'bg-white hover:bg-[#f2ede4] text-[#4a3f35] border-[#e5e0d8]'
+                              }`}
+                              translate="no"
+                            >
+                              {label}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     )}
