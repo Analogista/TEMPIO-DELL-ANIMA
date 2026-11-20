@@ -1299,7 +1299,11 @@ export default function App() {
   const [shareLegendModal, setShareLegendModal] = useState<{
     messages: string[];
     fullText: string;
+    imageStatus: 'preparing' | 'ready' | 'error';
+    imageBlob: Blob | null;
+    previewUrl: string | null;
   } | null>(null);
+  const shareGenerationIdRef = useRef<number>(0);
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
 
   const showAlert = (title: string, message: string, onClose?: () => void | Promise<void>) => {
@@ -1542,7 +1546,11 @@ export default function App() {
     setShowCandidacyModal(false);
     setSubmissionResult(null);
     setAppDialog(null);
-    setShareLegendModal(null);
+    shareGenerationIdRef.current += 1;
+    setShareLegendModal((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
     setFullscreenImageUrl(null);
     setUserData({ ...INITIAL_USER_DATA });
     lastSavedRuneKeyRef.current = null;
@@ -2433,15 +2441,72 @@ export default function App() {
     }
   };
 
+  const closeShareLegendModal = () => {
+    shareGenerationIdRef.current += 1;
+    setShareLegendModal((prev) => {
+      if (prev?.previewUrl) {
+        URL.revokeObjectURL(prev.previewUrl);
+      }
+      return null;
+    });
+  };
+
+  const handleSendShareImage = async () => {
+    if (!shareLegendModal || shareLegendModal.imageStatus !== 'ready' || !shareLegendModal.imageBlob) {
+      return;
+    }
+    const blob = shareLegendModal.imageBlob;
+    const file = new File([blob], 'costellazione.png', { type: 'image/png' });
+
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'La mia Costellazione',
+          text: shareLegendModal.fullText
+        });
+        return;
+      } catch (shareError: any) {
+        if (shareError?.name === 'AbortError') {
+          return;
+        }
+        console.log('Native share failed, falling back to download', shareError);
+      }
+    }
+
+    // Fallback senza navigator.share: scarica il file immagine già pronto
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = 'costellazione.png';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    }, 500);
+  };
+
   const executeShare = async () => {
     if (!boardRef.current || isSharing) return;
-
-    setIsSharing(true);
 
     const resolvedChars = resolveCharsWithStair(characters);
     const legendText = buildWhatsAppLegendText(resolvedChars);
     const legendMessages = splitWhatsAppLegendMessages(legendText, 1500);
-    const primaryWhatsappUrl = `https://wa.me/393497921890?text=${encodeURIComponent(legendMessages[0] || legendText)}`;
+
+    const genId = ++shareGenerationIdRef.current;
+    setIsSharing(true);
+    setShareLegendModal((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return {
+        messages: legendMessages,
+        fullText: legendText,
+        imageStatus: 'preparing',
+        imageBlob: null,
+        previewUrl: null
+      };
+    });
 
     const persistShareIfLoggedIn = async (capturedBlob: Blob | null) => {
       if (!user || resolvedChars.length === 0) return;
@@ -2466,54 +2531,52 @@ export default function App() {
       const blob = await captureConstellationBlob();
       const savePromise = persistShareIfLoggedIn(blob);
 
-      if (blob) {
-        const file = new File([blob], 'costellazione.png', { type: 'image/png' });
-
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: 'La mia Costellazione',
-              text: legendText,
-            });
-            await savePromise;
-            setShareLegendModal({ messages: legendMessages, fullText: legendText });
-            return;
-          } catch (shareError: any) {
-            if (shareError?.name === 'AbortError') {
-              await savePromise;
-              return;
+      if (shareGenerationIdRef.current === genId) {
+        if (blob) {
+          const previewUrl = URL.createObjectURL(blob);
+          setShareLegendModal((prev) => {
+            if (!prev) {
+              URL.revokeObjectURL(previewUrl);
+              return null;
             }
-            console.log('Native share failed, falling back to download', shareError);
-          }
+            if (prev.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+            return {
+              ...prev,
+              imageStatus: 'ready',
+              imageBlob: blob,
+              previewUrl
+            };
+          });
+        } else {
+          setShareLegendModal((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  imageStatus: 'error',
+                  imageBlob: null,
+                  previewUrl: null
+                }
+              : null
+          );
         }
-
-        // Fallback senza navigator.share: download PNG + WhatsApp con testo legenda + modale
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'costellazione.png';
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-
-        await savePromise;
-
-        setTimeout(() => {
-          window.open(primaryWhatsappUrl, '_blank');
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-        }, 500);
-        setShareLegendModal({ messages: legendMessages, fullText: legendText });
-      } else {
-        await savePromise;
-        window.open(primaryWhatsappUrl, '_blank');
-        setShareLegendModal({ messages: legendMessages, fullText: legendText });
       }
+
+      await savePromise;
     } catch (error) {
-      console.error('Errore durante la condivisione:', error);
-      window.open(primaryWhatsappUrl, '_blank');
-      setShareLegendModal({ messages: legendMessages, fullText: legendText });
+      console.error('Errore durante la generazione immagine:', error);
+      await persistShareIfLoggedIn(null);
+      if (shareGenerationIdRef.current === genId) {
+        setShareLegendModal((prev) =>
+          prev
+            ? {
+                ...prev,
+                imageStatus: 'error',
+                imageBlob: null,
+                previewUrl: null
+              }
+            : null
+        );
+      }
     } finally {
       setIsSharing(false);
     }
@@ -5676,14 +5739,14 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Post-share WhatsApp Legend Modal */}
+      {/* Share & WhatsApp Legend Modal */}
       <AnimatePresence>
         {shareLegendModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setShareLegendModal(null)}
+            onClick={closeShareLegendModal}
             className="fixed inset-0 z-[290] flex items-center justify-center bg-[#4a3f35]/40 backdrop-blur-md p-4"
           >
             <motion.div
@@ -5691,27 +5754,44 @@ export default function App() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.92, y: 16 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-2xl max-w-lg w-full border border-[#e5e0d8]"
+              className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto border border-[#e5e0d8]"
             >
-              <div className="flex justify-between items-start gap-4 mb-4">
+              <div className="flex justify-between items-start gap-4 mb-3">
                 <h3 className="text-xl sm:text-2xl font-serif italic text-[#4a3f35]">
                   Legenda per Graziamaria
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setShareLegendModal(null)}
+                  onClick={closeShareLegendModal}
                   className="p-2 hover:bg-[#f8f5f0] rounded-full transition-colors text-[#4a3f35]"
                   aria-label="Chiudi"
                 >
                   <X size={18} />
                 </button>
               </div>
-              <p className="text-xs text-[#4a3f35]/70 mb-3 leading-relaxed">
-                Immagine pronta. Puoi inviare subito anche il riepilogo scritto della costellazione su WhatsApp:
-              </p>
-              <div className="max-h-56 overflow-y-auto p-3 rounded-2xl bg-[#fdfbf7] border border-[#e5e0d8] text-xs text-[#4a3f35] whitespace-pre-line leading-relaxed mb-5">
+
+              {shareLegendModal.imageStatus === 'preparing' ? (
+                <div className="mb-3 p-4 rounded-2xl border border-[#e5e0d8] bg-[#fdfbf7] text-center text-xs text-[#8a7954] font-medium">
+                  Preparo l&apos;immagine…
+                </div>
+              ) : shareLegendModal.imageStatus === 'ready' && shareLegendModal.previewUrl ? (
+                <div className="mb-3 p-2 rounded-2xl border border-[#e5e0d8] bg-[#f8f5f0] flex justify-center">
+                  <img
+                    src={shareLegendModal.previewUrl}
+                    alt="Anteprima della costellazione"
+                    className="max-h-36 w-auto object-contain rounded-xl"
+                  />
+                </div>
+              ) : (
+                <div className="mb-3 p-3 rounded-2xl border border-amber-200 bg-amber-50 text-amber-800 text-xs leading-relaxed">
+                  Non è stato possibile preparare l&apos;immagine automatica della costellazione. Puoi comunque inviare la legenda scritta su WhatsApp.
+                </div>
+              )}
+
+              <div className="max-h-48 overflow-y-auto p-3 rounded-2xl bg-[#fdfbf7] border border-[#e5e0d8] text-xs text-[#4a3f35] whitespace-pre-line leading-relaxed mb-4">
                 {shareLegendModal.fullText}
               </div>
+
               <div className="flex flex-col gap-2.5">
                 {shareLegendModal.messages.length === 1 ? (
                   <button
@@ -5723,7 +5803,7 @@ export default function App() {
                     className="w-full py-3 px-5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#25D366] text-white hover:bg-[#128C7E] shadow-lg transition-all flex items-center justify-center gap-2"
                   >
                     <MessageCircle size={16} />
-                    <span>Invia anche la legenda scritta</span>
+                    <span>Invia legenda su WhatsApp</span>
                   </button>
                 ) : (
                   shareLegendModal.messages.map((msg, idx) => (
@@ -5739,7 +5819,7 @@ export default function App() {
                       <MessageCircle size={16} />
                       <span>
                         {idx === 0
-                          ? `Invia anche la legenda scritta (1/${shareLegendModal.messages.length})`
+                          ? `Invia legenda su WhatsApp (1/${shareLegendModal.messages.length})`
                           : `Invia parte ${idx + 1}/${shareLegendModal.messages.length} su WhatsApp`}
                       </span>
                     </button>
@@ -5747,7 +5827,18 @@ export default function App() {
                 )}
                 <button
                   type="button"
-                  onClick={() => setShareLegendModal(null)}
+                  onClick={handleSendShareImage}
+                  disabled={shareLegendModal.imageStatus !== 'ready'}
+                  className="w-full py-3 px-5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#c2b280] text-white hover:bg-[#b1a170] disabled:opacity-45 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
+                >
+                  <Share2 size={16} />
+                  <span>
+                    {shareLegendModal.imageStatus === 'preparing' ? "Preparo l'immagine…" : 'Invia immagine'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={closeShareLegendModal}
                   className="w-full py-2.5 px-5 rounded-full text-xs font-bold uppercase tracking-wider border border-[#e5e0d8] text-[#4a3f35] hover:bg-[#f8f5f0] transition-all"
                 >
                   Chiudi
