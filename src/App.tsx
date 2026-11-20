@@ -971,6 +971,127 @@ function clearBrowserCandidacyData() {
   clearMatchingKeys(window.sessionStorage);
 }
 
+const CONSTELLATION_DRAFT_PREFIX = 'tempio_costellazione_bozza_';
+const CONSTELLATION_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+type ConstellationDraftCharacter = {
+  id: string;
+  shape: CharacterType['shape'];
+  color: string;
+  label: string;
+  feeling?: 'piacevole' | 'spiacevole';
+  memory?: string;
+  stair: 'upper' | 'lower';
+  normalizedX: number;
+};
+
+type ConstellationDraftPayload = {
+  savedAt: number;
+  characters: ConstellationDraftCharacter[];
+  userData: {
+    nome: string;
+    eta: string;
+    sesso: string;
+  };
+  pendingCharacter: {
+    id: string;
+    shape: CharacterType['shape'];
+    color: string;
+    label: string;
+  } | null;
+};
+
+function getConstellationDraftKey(uid?: string | null): string {
+  return `${CONSTELLATION_DRAFT_PREFIX}${uid || 'anonimo'}`;
+}
+
+function clearConstellationDraft(uid?: string | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(getConstellationDraftKey(uid));
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+function saveConstellationDraft(
+  uid: string | null | undefined,
+  data: {
+    characters: CharacterType[];
+    userData: { nome: string; eta: string; sesso: string };
+    pendingCharacter: PendingCharacterType | null;
+  }
+) {
+  if (typeof window === 'undefined') return;
+  try {
+    const payload: ConstellationDraftPayload = {
+      savedAt: Date.now(),
+      characters: data.characters.map((c) => ({
+        id: c.id,
+        shape: c.shape,
+        color: c.color,
+        label: c.label,
+        ...(c.feeling ? { feeling: c.feeling } : {}),
+        ...(c.memory ? { memory: c.memory } : {}),
+        stair: getCharacterStairV2(c),
+        normalizedX: getCharacterNormalizedX(c)
+      })),
+      userData: {
+        nome: data.userData.nome || '',
+        eta: data.userData.eta || '',
+        sesso: data.userData.sesso || ''
+      },
+      pendingCharacter: data.pendingCharacter
+        ? {
+            id: data.pendingCharacter.id,
+            shape: data.pendingCharacter.shape,
+            color: data.pendingCharacter.color,
+            label: data.pendingCharacter.label
+          }
+        : null
+    };
+    window.localStorage.setItem(getConstellationDraftKey(uid), JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota or restricted context errors
+  }
+}
+
+function loadConstellationDraft(uid?: string | null): ConstellationDraftPayload | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const key = getConstellationDraftKey(uid);
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ConstellationDraftPayload | null;
+    if (!parsed || typeof parsed.savedAt !== 'number') {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    if (Date.now() - parsed.savedAt > CONSTELLATION_DRAFT_TTL_MS) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    const chars = Array.isArray(parsed.characters) ? parsed.characters : [];
+    const hasPending = Boolean(parsed.pendingCharacter && parsed.pendingCharacter.shape);
+    if (chars.length === 0 && !hasPending) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return {
+      savedAt: parsed.savedAt,
+      characters: chars,
+      userData: {
+        nome: parsed.userData?.nome || '',
+        eta: parsed.userData?.eta || '',
+        sesso: parsed.userData?.sesso || ''
+      },
+      pendingCharacter: hasPending ? parsed.pendingCharacter : null
+    };
+  } catch {
+    return null;
+  }
+}
+
 type PendingCharacterType = {
   id: string;
   shape: CharacterType['shape'];
@@ -1143,6 +1264,7 @@ export default function App() {
   const [workflowStep, setWorkflowStep] = useState(0); // 0: Placement, 1: Analysis
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [analyzingCharacter, setAnalyzingCharacter] = useState<CharacterType | null>(null);
+  const [tempLabelEdit, setTempLabelEdit] = useState('');
   const [tempMemory, setTempMemory] = useState('');
   const [tempFeeling, setTempFeeling] = useState<'piacevole' | 'spiacevole' | null>(null);
   const [userData, setUserData] = useState({ ...INITIAL_USER_DATA });
@@ -1171,6 +1293,7 @@ export default function App() {
     cancelLabel?: string;
     onConfirm?: () => void | Promise<void>;
     onCancel?: () => void | Promise<void>;
+    onDismiss?: () => void | Promise<void>;
     onClose?: () => void | Promise<void>;
   } | null>(null);
   const [shareLegendModal, setShareLegendModal] = useState<{
@@ -1187,7 +1310,13 @@ export default function App() {
     title: string,
     message: string,
     onConfirm: () => void | Promise<void>,
-    options?: { danger?: boolean; confirmLabel?: string; cancelLabel?: string; onCancel?: () => void | Promise<void> }
+    options?: {
+      danger?: boolean;
+      confirmLabel?: string;
+      cancelLabel?: string;
+      onCancel?: () => void | Promise<void>;
+      onDismiss?: () => void | Promise<void>;
+    }
   ) => {
     setAppDialog({
       mode: 'confirm',
@@ -1197,7 +1326,8 @@ export default function App() {
       confirmLabel: options?.confirmLabel,
       cancelLabel: options?.cancelLabel,
       onConfirm,
-      onCancel: options?.onCancel
+      onCancel: options?.onCancel,
+      onDismiss: options?.onDismiss
     });
   };
 
@@ -1403,6 +1533,7 @@ export default function App() {
     setWorkflowStep(0);
     setShowWorkflowModal(false);
     setAnalyzingCharacter(null);
+    setTempLabelEdit('');
     setTempMemory('');
     setTempFeeling(null);
     setCandidacyForm({ ...INITIAL_CANDIDACY_FORM });
@@ -1418,6 +1549,8 @@ export default function App() {
     lastSavedFlowerKeyRef.current = null;
     lastSavedConstellationKeyRef.current = null;
     lastSavedConstellationHasScreenshotRef.current = false;
+    isDraftPromptPendingRef.current = false;
+    checkedDraftKeyRef.current = null;
     clearBrowserCandidacyData();
     if (options?.navigateHome) {
       setCurrentPage('home');
@@ -1436,6 +1569,8 @@ export default function App() {
         previousUidRef.current = null;
         setUser(null);
         if (prevUid !== null) {
+          clearConstellationDraft(prevUid);
+          clearConstellationDraft(null);
           resetSessionState({ navigateHome: true });
         } else {
           setUserCandidacies([]);
@@ -1444,6 +1579,9 @@ export default function App() {
       }
 
       if (prevUid !== null && prevUid !== u.uid) {
+        clearConstellationDraft(prevUid);
+        clearConstellationDraft(u.uid);
+        clearConstellationDraft(null);
         resetSessionState({ navigateHome: true });
       }
       previousUidRef.current = u.uid;
@@ -1494,9 +1632,12 @@ export default function App() {
   };
 
   const logout = async () => {
+    const activeUid = previousUidRef.current || user?.uid || null;
     try {
       await signOut(auth);
     } finally {
+      clearConstellationDraft(activeUid);
+      clearConstellationDraft(null);
       previousUidRef.current = null;
       setUser(null);
       resetSessionState({ navigateHome: true });
@@ -1790,6 +1931,8 @@ export default function App() {
       await batch.commit();
       lastSavedConstellationKeyRef.current = key;
       lastSavedConstellationHasScreenshotRef.current = Boolean(screenshotUrl);
+      clearConstellationDraft(user.uid);
+      clearConstellationDraft(null);
       return true;
     } catch (e) {
       handleFirestoreError(e, 'create', `users/${user.uid}/constellations`);
@@ -1920,6 +2063,11 @@ export default function App() {
   const stageRef = useRef<HTMLDivElement>(null);
   const neutralAreaRef = useRef<HTMLDivElement>(null);
   const constellationWorkAreaRef = useRef<HTMLDivElement>(null);
+  const isDraftPromptPendingRef = useRef<boolean>(false);
+  const checkedDraftKeyRef = useRef<string | null>(null);
+  const charPointerDownRef = useRef<{ id: string; x: number; y: number } | null>(null);
+  const activeDraggedCharRef = useRef<string | null>(null);
+  const lastCharDragEndRef = useRef<{ id: string; at: number } | null>(null);
   const [draggingCharId, setDraggingCharId] = useState<string | null>(null);
   const [stageWidth, setStageWidth] = useState<number>(() =>
     typeof window !== 'undefined' && window.innerWidth < 640 ? 340 : 800
@@ -1930,6 +2078,97 @@ export default function App() {
   const [showCostellazioniHelp, setShowCostellazioniHelp] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 768 : true
   );
+
+  // Ripristino bozza locale alla riapertura della pagina Costellazioni
+  useEffect(() => {
+    if (currentPage !== 'costellazioni') {
+      checkedDraftKeyRef.current = null;
+      isDraftPromptPendingRef.current = false;
+      return;
+    }
+    const draftKey = getConstellationDraftKey(user?.uid);
+    if (checkedDraftKeyRef.current === draftKey) return;
+    checkedDraftKeyRef.current = draftKey;
+
+    if (characters.length > 0 || pendingCharacter !== null) {
+      return;
+    }
+
+    const draft = loadConstellationDraft(user?.uid);
+    if (!draft) return;
+
+    isDraftPromptPendingRef.current = true;
+    showConfirm(
+      'Riprendi costellazione',
+      'Hai una costellazione non terminata. Vuoi riprenderla?',
+      () => {
+        const restoredChars: CharacterType[] = draft.characters.map((c) => {
+          const stair: 'upper' | 'lower' = c.stair === 'upper' || c.stair === 'lower' ? c.stair : 'lower';
+          const normalizedX = clamp01(Number(c.normalizedX));
+          return {
+            id: c.id || Math.random().toString(36).substr(2, 9),
+            shape: c.shape,
+            color: c.color,
+            label: c.label || 'Sconosciuto',
+            x: Math.round(getStairXRatio(stair, normalizedX) * STAGE_REF_WIDTH),
+            y: Math.round(STAIR_GEOMETRY[stair].yRatio * STAGE_REF_HEIGHT),
+            stair,
+            normalizedX,
+            snapSeq: 0,
+            ...(c.feeling ? { feeling: c.feeling } : {}),
+            ...(c.memory ? { memory: c.memory } : {})
+          };
+        });
+        setCharacters(restoredChars);
+        setPendingCharacter(
+          draft.pendingCharacter
+            ? { ...draft.pendingCharacter, snapSeq: 0 }
+            : null
+        );
+        setUserData(prev => ({
+          ...prev,
+          nome: draft.userData?.nome || '',
+          eta: draft.userData?.eta || '',
+          sesso: draft.userData?.sesso || ''
+        }));
+        setWorkflowStep(0);
+        isDraftPromptPendingRef.current = false;
+      },
+      {
+        confirmLabel: 'Riprendi',
+        cancelLabel: 'Ricomincia',
+        onCancel: () => {
+          clearConstellationDraft(user?.uid);
+          isDraftPromptPendingRef.current = false;
+        },
+        onDismiss: () => {
+          isDraftPromptPendingRef.current = false;
+        }
+      }
+    );
+  }, [currentPage, user?.uid]);
+
+  // Salvataggio automatico della bozza locale con ritardo di 500 ms
+  useEffect(() => {
+    if (currentPage !== 'costellazioni') return;
+    if (isDraftPromptPendingRef.current) return;
+    if (characters.length === 0 && !pendingCharacter) return;
+
+    const timer = setTimeout(() => {
+      if (isDraftPromptPendingRef.current) return;
+      saveConstellationDraft(user?.uid, {
+        characters,
+        userData: {
+          nome: userData.nome || '',
+          eta: userData.eta || '',
+          sesso: userData.sesso || ''
+        },
+        pendingCharacter
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [currentPage, characters, pendingCharacter, userData.nome, userData.eta, userData.sesso, user?.uid]);
 
   useEffect(() => {
     let observer: ResizeObserver | null = null;
@@ -2032,27 +2271,57 @@ export default function App() {
 
   const removeCharacter = (id: string) => {
     if (workflowStep !== 0) return;
-    setCharacters(characters.filter(c => c.id !== id));
+    setCharacters(prev => {
+      const next = prev.filter(c => c.id !== id);
+      if (next.length === 0 && !pendingCharacter) {
+        clearConstellationDraft(user?.uid);
+      }
+      return next;
+    });
   };
 
   const handleCharacterClick = (char: CharacterType) => {
-    if (workflowStep !== 1) return;
-    if (char.label.toLowerCase() === 'io') return;
-    
     setAnalyzingCharacter(char);
+    setTempLabelEdit(char.label || '');
     setTempMemory(char.memory || '');
     setTempFeeling(char.feeling || null);
   };
 
   const saveAnalysis = () => {
     if (!analyzingCharacter) return;
-    
+    const nextLabel = tempLabelEdit.trim() || 'Sconosciuto';
+
     setCharacters(prev => prev.map(c => 
       c.id === analyzingCharacter.id 
-        ? { ...c, feeling: tempFeeling || undefined, memory: tempMemory } 
+        ? {
+            ...c,
+            label: nextLabel,
+            feeling: tempFeeling || undefined,
+            memory: tempMemory
+          } 
         : c
     ));
     setAnalyzingCharacter(null);
+  };
+
+  const requestRemoveEditedCharacter = () => {
+    if (!analyzingCharacter) return;
+    const target = analyzingCharacter;
+    showConfirm(
+      'Rimuovi pupazzo',
+      `Vuoi rimuovere "${target.label || 'Senza nome'}" dalla costellazione?`,
+      () => {
+        setCharacters(prev => {
+          const next = prev.filter(c => c.id !== target.id);
+          if (next.length === 0 && !pendingCharacter) {
+            clearConstellationDraft(user?.uid);
+          }
+          return next;
+        });
+        setAnalyzingCharacter(null);
+      },
+      { danger: true, confirmLabel: 'Rimuovi', cancelLabel: 'Annulla' }
+    );
   };
 
   const executeGeneratePDF = async () => {
@@ -3412,6 +3681,8 @@ export default function App() {
                           setPendingCharacter(null);
                           setIsDraggingPending(false);
                           setWorkflowStep(0);
+                          clearConstellationDraft(user?.uid);
+                          clearConstellationDraft(null);
                         },
                         { danger: true }
                       );
@@ -3683,8 +3954,17 @@ export default function App() {
                                 dragMomentum={false}
                                 initial={char.snapSeq ? false : { scale: 0 }}
                                 animate={{ scale: 1 }}
-                                onDragStart={() => setDraggingCharId(char.id)}
+                                onPointerDown={(e) => {
+                                  charPointerDownRef.current = { id: char.id, x: e.clientX, y: e.clientY };
+                                  activeDraggedCharRef.current = null;
+                                }}
+                                onDragStart={() => {
+                                  activeDraggedCharRef.current = char.id;
+                                  setDraggingCharId(char.id);
+                                }}
                                 onDragEnd={() => {
+                                  lastCharDragEndRef.current = { id: char.id, at: Date.now() };
+                                  activeDraggedCharRef.current = null;
                                   setDraggingCharId(null);
                                   const figEl = boardRef.current?.querySelector(`[data-char-figure-id="${char.id}"]`) as HTMLElement | null;
                                   const stageEl = stageRef.current;
@@ -3723,29 +4003,34 @@ export default function App() {
                                       : c
                                   ));
                                 }}
-                                onClick={() => handleCharacterClick(char)}
+                                onClick={(e) => {
+                                  if (activeDraggedCharRef.current === char.id) return;
+                                  if (lastCharDragEndRef.current?.id === char.id && Date.now() - lastCharDragEndRef.current.at < 300) {
+                                    return;
+                                  }
+                                  const start = charPointerDownRef.current;
+                                  if (start && start.id === char.id && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) {
+                                    return;
+                                  }
+                                  handleCharacterClick(char);
+                                }}
                                 className={`relative group ${
                                   (workflowStep === 0 || char.label.toLowerCase() === 'io') 
                                     ? 'cursor-grab active:cursor-grabbing' 
-                                    : workflowStep === 1 
-                                      ? 'cursor-pointer' 
-                                      : ''
+                                    : 'cursor-pointer'
                                 }`}
                                 style={{
                                   width: 0,
                                   height: 0,
                                   opacity: isDragging ? 0.55 : 1,
+                                  touchAction: (workflowStep === 0 || char.label.toLowerCase() === 'io') ? 'none' : 'auto',
                                   transition: 'opacity 120ms ease'
                                 }}
                               >
                                 {/* Figura ancorata con la base sulla superficie del gradino (0, 0) */}
                                 <div
                                   data-char-figure-id={char.id}
-                                  className={`absolute bottom-0 left-0 flex justify-center ${
-                                    workflowStep === 1 && char.label.toLowerCase() !== 'io'
-                                      ? 'hover:ring-2 hover:ring-[#5a5a40] rounded-2xl transition-all'
-                                      : ''
-                                  }`}
+                                  className="absolute bottom-0 left-0 flex justify-center hover:ring-2 hover:ring-[#c2b280]/80 rounded-2xl transition-all"
                                   style={{ transform: 'translateX(-50%)' }}
                                 >
                                   {renderShape(
@@ -3796,11 +4081,7 @@ export default function App() {
                                 handleCharacterClick(pill.char);
                               }
                             }}
-                            className={`absolute z-40 px-2.5 bg-white rounded-full shadow-sm border font-medium whitespace-nowrap flex items-center justify-center text-[#4a3f35] ${
-                              workflowStep === 1 && pill.char.label.toLowerCase() !== 'io'
-                                ? 'cursor-pointer hover:border-[#5a5a40]'
-                                : 'cursor-default'
-                            }`}
+                            className="absolute z-40 px-2.5 bg-white rounded-full shadow-sm border font-medium whitespace-nowrap flex items-center justify-center text-[#4a3f35] cursor-pointer hover:border-[#5a5a40]"
                             style={{
                               left: `${pill.centerX}px`,
                               top: `${pill.pillTopY}px`,
@@ -4912,64 +5193,128 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Analysis Modal */}
+      {/* Quick Edit & Analysis Modal */}
       <AnimatePresence>
         {analyzingCharacter && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            onClick={() => setAnalyzingCharacter(null)}
             className="fixed inset-0 z-[120] flex items-center justify-center bg-[#4a3f35]/60 backdrop-blur-md p-4"
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="bg-white p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-2xl max-w-md w-full flex flex-col border border-[#e5e0d8]"
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto flex flex-col border border-[#e5e0d8]"
             >
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl sm:text-2xl font-serif italic">Analisi: {analyzingCharacter.label}</h2>
-                <button onClick={() => setAnalyzingCharacter(null)} className="p-2 hover:bg-[#f8f5f0] rounded-full transition-colors">
+              <div className="flex justify-between items-center mb-4 sm:mb-6">
+                <h2 className="text-xl sm:text-2xl font-serif italic text-[#4a3f35]">
+                  Modifica: {analyzingCharacter.label || 'Senza nome'}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setAnalyzingCharacter(null)}
+                  className="p-2 hover:bg-[#f8f5f0] rounded-full transition-colors"
+                  aria-label="Chiudi"
+                >
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-5">
                 <div>
-                  <p className="text-sm font-medium mb-3">Con {analyzingCharacter.label} provi una sensazione/ricordo:</p>
+                  <label htmlFor="quick-edit-char-label" className="block text-xs font-bold uppercase tracking-widest text-[#5a5a40] mb-2">
+                    Nome / ruolo
+                  </label>
+                  <input
+                    id="quick-edit-char-label"
+                    type="text"
+                    value={tempLabelEdit}
+                    onChange={(e) => setTempLabelEdit(e.target.value)}
+                    placeholder="Chi rappresenta per te? (es. Mamma)"
+                    className="w-full px-4 py-2.5 bg-[#f8f5f0] border border-[#e5e0d8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#5a5a40] text-sm text-[#4a3f35]"
+                  />
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {PREDEFINED_LABELS.slice(0, 8).map(label => (
+                      <button
+                        key={`edit-preset-${label}`}
+                        type="button"
+                        onClick={() => setTempLabelEdit(label)}
+                        className={`px-2.5 py-1 text-[10px] rounded-full border transition-colors ${
+                          tempLabelEdit === label
+                            ? 'bg-[#c2b280] text-white border-[#c2b280]'
+                            : 'bg-[#f8f5f0] hover:bg-[#e5e0d8] text-[#4a3f35] border-[#e5e0d8]'
+                        }`}
+                        translate="no"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest text-[#5a5a40] mb-2">Emozione</p>
                   <div className="flex gap-3">
                     <button 
-                      onClick={() => setTempFeeling('piacevole')}
-                      className={`flex-1 py-3 rounded-xl border-2 flex items-center justify-center gap-2 transition-all ${tempFeeling === 'piacevole' ? 'bg-green-50 border-green-500 text-green-700 shadow-inner' : 'border-[#e5e0d8] hover:bg-gray-50'}`}
+                      type="button"
+                      onClick={() => setTempFeeling(prev => prev === 'piacevole' ? null : 'piacevole')}
+                      className={`flex-1 py-2.5 rounded-xl border-2 flex items-center justify-center gap-2 transition-all ${tempFeeling === 'piacevole' ? 'bg-green-50 border-green-500 text-green-700 shadow-inner' : 'border-[#e5e0d8] hover:bg-gray-50'}`}
                     >
-                      <Heart size={18} fill={tempFeeling === 'piacevole' ? 'currentColor' : 'none'} />
+                      <Heart size={16} fill={tempFeeling === 'piacevole' ? 'currentColor' : 'none'} />
                       <span className="font-bold text-xs uppercase">PIACEVOLE</span>
                     </button>
                     <button 
-                      onClick={() => setTempFeeling('spiacevole')}
-                      className={`flex-1 py-3 rounded-xl border-2 flex items-center justify-center gap-2 transition-all ${tempFeeling === 'spiacevole' ? 'bg-red-50 border-red-500 text-red-700 shadow-inner' : 'border-[#e5e0d8] hover:bg-gray-50'}`}
+                      type="button"
+                      onClick={() => setTempFeeling(prev => prev === 'spiacevole' ? null : 'spiacevole')}
+                      className={`flex-1 py-2.5 rounded-xl border-2 flex items-center justify-center gap-2 transition-all ${tempFeeling === 'spiacevole' ? 'bg-red-50 border-red-500 text-red-700 shadow-inner' : 'border-[#e5e0d8] hover:bg-gray-50'}`}
                     >
-                      <Frown size={18} fill={tempFeeling === 'spiacevole' ? 'currentColor' : 'none'} />
+                      <Frown size={16} fill={tempFeeling === 'spiacevole' ? 'currentColor' : 'none'} />
                       <span className="font-bold text-xs uppercase">SPIACEVOLE</span>
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <p className="text-sm font-medium mb-3">Se ricordi un evento scrivilo qui sotto:</p>
+                  <label htmlFor="quick-edit-char-memory" className="block text-xs font-bold uppercase tracking-widest text-[#5a5a40] mb-2">
+                    Memoria / evento
+                  </label>
                   <textarea 
+                    id="quick-edit-char-memory"
                     value={tempMemory}
                     onChange={(e) => setTempMemory(e.target.value)}
                     placeholder="Scrivi qui il tuo ricordo..."
-                    className="w-full p-4 bg-[#f8f5f0] border border-[#e5e0d8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#5a5a40] min-h-[120px] text-sm"
+                    className="w-full p-3.5 bg-[#f8f5f0] border border-[#e5e0d8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#5a5a40] min-h-[96px] text-sm text-[#4a3f35]"
                   />
                 </div>
 
-                <button 
-                  onClick={saveAnalysis}
-                  className="w-full py-4 bg-[#5a5a40] text-white rounded-xl font-bold hover:bg-[#4a4a35] transition-all shadow-lg active:scale-95 uppercase tracking-widest text-sm"
-                >
-                  Salva Analisi
-                </button>
+                <div className="flex flex-col gap-2.5 pt-1">
+                  <button 
+                    type="button"
+                    onClick={saveAnalysis}
+                    className="w-full py-3.5 bg-[#5a5a40] text-white rounded-xl font-bold hover:bg-[#4a4a35] transition-all shadow-lg active:scale-95 uppercase tracking-widest text-xs sm:text-sm"
+                  >
+                    Salva
+                  </button>
+                  <div className="flex gap-2.5">
+                    <button
+                      type="button"
+                      onClick={requestRemoveEditedCharacter}
+                      className="flex-1 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-100 transition-colors text-xs uppercase tracking-wider"
+                    >
+                      Rimuovi pupazzo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnalyzingCharacter(null)}
+                      className="flex-1 py-2.5 bg-[#f8f5f0] text-[#4a3f35] border border-[#e5e0d8] rounded-xl font-bold hover:bg-[#e5e0d8] transition-colors text-xs uppercase tracking-wider"
+                    >
+                      Annulla
+                    </button>
+                  </div>
+                </div>
               </div>
             </motion.div>
           </motion.div>
@@ -5450,7 +5795,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={async () => {
-              const closeAction = appDialog.mode === 'alert' ? appDialog.onClose : undefined;
+              const closeAction = appDialog.mode === 'alert' ? appDialog.onClose : appDialog.onDismiss;
               setAppDialog(null);
               if (closeAction) await closeAction();
             }}
@@ -5468,7 +5813,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={async () => {
-                    const closeAction = appDialog.mode === 'alert' ? appDialog.onClose : undefined;
+                    const closeAction = appDialog.mode === 'alert' ? appDialog.onClose : appDialog.onDismiss;
                     setAppDialog(null);
                     if (closeAction) await closeAction();
                   }}
