@@ -320,6 +320,41 @@
         "createdAt",
         "deletionRequested"
       ]
+    },
+    "AkashicReading": {
+      "title": "AkashicReading",
+      "description": "Admin-authored 7-chapter Akashic Records reading linked 1:1 to an AkashicRequest.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string"
+        },
+        "chapters": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        },
+        "published": {
+          "type": "boolean"
+        },
+        "publishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerUid",
+        "chapters",
+        "published",
+        "publishedAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -358,6 +393,10 @@
     "/akashicRequests/{requestId}": {
       "schema": "AkashicRequest",
       "description": "User requests for Akashic Records readings."
+    },
+    "/akashicReadings/{requestId}": {
+      "schema": "AkashicReading",
+      "description": "7-chapter Akashic readings authored by admin for each request."
     }
   }
 }
