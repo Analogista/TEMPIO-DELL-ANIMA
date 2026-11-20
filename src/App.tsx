@@ -56,7 +56,7 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { auth, db, storage, handleFirestoreError } from './lib/firebase';
 
 type BuildingSlotType = {
-  floor: number; // 1 (pianoterra) .. 10 (ultimo piano)
+  floor: number; // 1 (pianoterra) .. 5 (ultimo piano)
   col: number;   // 0 .. 4 da sinistra dello schermo
 };
 
@@ -178,19 +178,20 @@ const STAGE_IMAGE_URL = '/assets/aistudio/gradini-frontali_8b28bf22.webp';
 const STAGE_REF_WIDTH = 1600;
 const STAGE_REF_HEIGHT = 900;
 
-const BUILDING_IMAGE_URL = '/assets/aistudio/palazzo-liberty_96e2067f.webp';
+const BUILDING_IMAGE_URL = '/assets/aistudio/palazzo-liberty-5_4611a372.webp';
 const BUILDING_REF_WIDTH = 1000;
-const BUILDING_REF_HEIGHT = 2000;
-const BUILDING_FLOORS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
+const BUILDING_REF_HEIGHT = 1100;
+const BUILDING_FLOORS = [5, 4, 3, 2, 1] as const;
 const BUILDING_COLS = [0, 1, 2, 3, 4] as const;
 const BUILDING_COL_X_PCTS = [14.8, 32.4, 50.0, 67.6, 85.2] as const;
-const BUILDING_FLOOR_Y_PCTS = [90.5, 81.5, 72.5, 63.5, 54.5, 45.5, 36.5, 27.5, 18.5, 9.5] as const;
+const BUILDING_FLOOR_Y_PCTS = [82.7, 66.4, 50.0, 33.6, 17.3] as const;
 const BUILDING_WINDOW_WIDTH_PCT = 12;
-const BUILDING_WINDOW_HEIGHT_PCT = 6;
+const BUILDING_WINDOW_HEIGHT_PCT = 10.9;
+const MAX_BUILDING_FIGURES = 25;
 const MAX_CONSTELLATION_FIGURES = 50;
 
 function getBuildingSlotCenterPct(slot: BuildingSlotType): { xPct: number; yPct: number } {
-  const floorIdx = Math.min(9, Math.max(0, Math.round(slot.floor) - 1));
+  const floorIdx = Math.min(4, Math.max(0, Math.round(slot.floor) - 1));
   const colIdx = Math.min(4, Math.max(0, Math.round(slot.col)));
   return {
     xPct: BUILDING_COL_X_PCTS[colIdx],
@@ -231,7 +232,7 @@ function findNearestFreeBuildingSlot(
       if (isBuildingSlotOccupied(chars, candidate, ignoreCharId)) continue;
       const center = getBuildingSlotCenterPct(candidate);
       const dx = xPct - center.xPct;
-      const dy = (yPct - center.yPct) * 2; // compensa rapporto 1:2 dell'immagine
+      const dy = (yPct - center.yPct) * (BUILDING_REF_HEIGHT / BUILDING_REF_WIDTH); // compensa rapporto 10:11 dell'immagine
       const dist = dx * dx + dy * dy;
       if (dist < bestDist) {
         bestDist = dist;
@@ -1175,7 +1176,16 @@ function loadConstellationDraft(uid?: string | null): ConstellationDraftPayload 
       window.localStorage.removeItem(key);
       return null;
     }
-    const chars = Array.isArray(parsed.characters) ? parsed.characters : [];
+    const layoutType: ConstellationLayoutType = parsed.layoutType === 'building' ? 'building' : 'stairs';
+    const rawChars = Array.isArray(parsed.characters) ? parsed.characters : [];
+    const chars = layoutType === 'building'
+      ? rawChars.filter((c) => {
+          if (!c?.slot) return false;
+          const floor = Math.round(Number(c.slot.floor));
+          const col = Math.round(Number(c.slot.col));
+          return Number.isFinite(floor) && Number.isFinite(col) && floor >= 1 && floor <= 5 && col >= 0 && col <= 4;
+        })
+      : rawChars;
     const hasPending = Boolean(parsed.pendingCharacter && parsed.pendingCharacter.shape);
     if (chars.length === 0 && !hasPending) {
       window.localStorage.removeItem(key);
@@ -1183,7 +1193,7 @@ function loadConstellationDraft(uid?: string | null): ConstellationDraftPayload 
     }
     return {
       savedAt: parsed.savedAt,
-      layoutType: parsed.layoutType === 'building' ? 'building' : 'stairs',
+      layoutType,
       characters: chars,
       userData: {
         nome: parsed.userData?.nome || '',
@@ -1252,7 +1262,7 @@ function AdminConstellationPreview({
     const buildingScale = getBuildingFigureScale(Math.min(320, previewW));
     return (
       <div className="mb-4 p-3 rounded-2xl border border-[#e5e0d8] bg-[#f8f5f0] w-full">
-        <div ref={containerRef} className="relative w-full max-w-[320px] mx-auto aspect-[1/2]">
+        <div ref={containerRef} className="relative w-full max-w-[320px] mx-auto aspect-[10/11]">
           <img
             src={BUILDING_IMAGE_URL}
             alt="Palazzo Costellazione"
@@ -2167,9 +2177,8 @@ export default function App() {
   };
 
   const resolveCharsWithStair = (chars: CharacterType[]): CharacterType[] => {
-    const capped = chars.slice(0, MAX_CONSTELLATION_FIGURES);
     if (constellationLayoutType === 'building') {
-      return capped.map(char => {
+      return chars.slice(0, MAX_BUILDING_FIGURES).map(char => {
         const slot = char.slot || { floor: 1, col: 0 };
         const coords = getBuildingSlotRefCoords(slot);
         return {
@@ -2180,6 +2189,7 @@ export default function App() {
         };
       });
     }
+    const capped = chars.slice(0, MAX_CONSTELLATION_FIGURES);
     return capped.map(char => {
       const stair: 'upper' | 'lower' = char.stair === 'upper' || char.stair === 'lower'
         ? char.stair
@@ -2418,11 +2428,20 @@ export default function App() {
       'Hai una costellazione non terminata. Vuoi riprenderla?',
       () => {
         const restoredLayout: ConstellationLayoutType = draft.layoutType === 'building' ? 'building' : 'stairs';
-        const restoredChars: CharacterType[] = draft.characters.slice(0, MAX_CONSTELLATION_FIGURES).map((c) => {
+        const maxRestoredFigures = restoredLayout === 'building' ? MAX_BUILDING_FIGURES : MAX_CONSTELLATION_FIGURES;
+        const filteredDraftChars = restoredLayout === 'building'
+          ? draft.characters.filter((c) => {
+              if (!c.slot) return false;
+              const floor = Math.round(Number(c.slot.floor));
+              const col = Math.round(Number(c.slot.col));
+              return Number.isFinite(floor) && Number.isFinite(col) && floor >= 1 && floor <= 5 && col >= 0 && col <= 4;
+            })
+          : draft.characters;
+        const restoredChars: CharacterType[] = filteredDraftChars.slice(0, maxRestoredFigures).map((c) => {
           if (restoredLayout === 'building' && c.slot) {
             const slot = {
-              floor: Math.min(10, Math.max(1, Math.round(c.slot.floor))),
-              col: Math.min(4, Math.max(0, Math.round(c.slot.col)))
+              floor: Math.round(Number(c.slot.floor)),
+              col: Math.round(Number(c.slot.col))
             };
             const coords = getBuildingSlotRefCoords(slot);
             return {
@@ -2584,14 +2603,16 @@ export default function App() {
     setBuildingNotice(null);
   };
 
+  const maxFiguresForCurrentLayout = constellationLayoutType === 'building' ? MAX_BUILDING_FIGURES : MAX_CONSTELLATION_FIGURES;
+
   const handleDraw = () => {
-    if (pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES || availablePickerShapes.length === 0) return;
+    if (pendingCharacter || characters.length >= maxFiguresForCurrentLayout || availablePickerShapes.length === 0) return;
     const randomShape = availablePickerShapes[Math.floor(Math.random() * availablePickerShapes.length)];
     selectCharacter(randomShape);
   };
 
   const selectCharacter = (char: typeof CHARACTER_SHAPES[number]) => {
-    if (pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES || availablePickerShapes.length === 0) return;
+    if (pendingCharacter || characters.length >= maxFiguresForCurrentLayout || availablePickerShapes.length === 0) return;
     setPendingCharacter({
       id: Math.random().toString(36).substr(2, 9),
       shape: char.shape as CharacterType['shape'],
@@ -4238,7 +4259,7 @@ export default function App() {
                 <div className="flex gap-2">
                   <button 
                     onClick={() => setShowPicker(true)}
-                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= MAX_CONSTELLATION_FIGURES || availablePickerShapes.length === 0}
+                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= maxFiguresForCurrentLayout || availablePickerShapes.length === 0}
                     className="flex items-center justify-center gap-2 bg-[#c2b280] text-white transition-all shadow-md hover:bg-[#b1a170] disabled:opacity-30 disabled:cursor-not-allowed px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                     translate="no"
                   >
@@ -4247,7 +4268,7 @@ export default function App() {
 
                   <button 
                     onClick={handleDraw}
-                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= MAX_CONSTELLATION_FIGURES || availablePickerShapes.length === 0}
+                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= maxFiguresForCurrentLayout || availablePickerShapes.length === 0}
                     className="flex items-center justify-center gap-2 bg-[#e5e0d8] text-[#5a5a40] transition-all shadow-md hover:bg-[#d5d0c8] disabled:opacity-30 disabled:cursor-not-allowed px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                     translate="no"
                   >
@@ -4349,7 +4370,7 @@ export default function App() {
                 const buildingFigureScale = isBuilding ? getBuildingFigureScale(stageWidth) : 1;
 
                 const placePendingInBuildingSlot = (slot: BuildingSlotType) => {
-                  if (!pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES) return;
+                  if (!pendingCharacter || characters.length >= MAX_BUILDING_FIGURES) return;
                   if (isBuildingSlotOccupied(characters, slot)) {
                     showBuildingNotice('Finestra occupata');
                     return;
@@ -4627,11 +4648,11 @@ export default function App() {
 
                     {isBuilding ? (
                       <>
-                        {/* Tavola Palazzo (1:2, max 520px desktop, 10 piani x 5 finestre) */}
+                        {/* Tavola Palazzo (10:11, max 520px desktop, 5 piani x 5 finestre) */}
                         <div
                           ref={stageRef}
                           data-constellation-stage="true"
-                          className="relative w-full aspect-[1/2] select-none"
+                          className="relative w-full aspect-[10/11] select-none"
                         >
                           <img
                             src={BUILDING_IMAGE_URL}
@@ -4639,7 +4660,7 @@ export default function App() {
                             className="relative z-10 w-full h-full object-contain pointer-events-none select-none"
                           />
 
-                          {/* 50 finestre interattive (piani 1..10, col 0..4) */}
+                          {/* 25 finestre interattive (piani 1..5, col 0..4) */}
                           {BUILDING_FLOORS.map(floor =>
                             BUILDING_COLS.map(col => {
                               const slot = { floor, col };
