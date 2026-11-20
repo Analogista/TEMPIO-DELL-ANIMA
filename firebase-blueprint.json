@@ -239,6 +239,87 @@
         "readBy",
         "readAt"
       ]
+    },
+    "AkashicRequest": {
+      "title": "AkashicRequest",
+      "description": "A user request for an Akashic Records reading.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "birthDate": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "email": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "area": {
+          "type": "string",
+          "enum": [
+            "Amore e relazioni",
+            "Missione dell'anima",
+            "Blocchi interiori",
+            "Evoluzione personale",
+            "Relazioni familiari"
+          ]
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "hope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "consentAccepted": {
+          "type": "boolean"
+        },
+        "consentAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "nuova"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deletionRequested": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ownerUid",
+        "name",
+        "email",
+        "area",
+        "question",
+        "hope",
+        "consentAccepted",
+        "consentAt",
+        "status",
+        "createdAt",
+        "deletionRequested"
+      ]
     }
   },
   "firestore": {
@@ -273,6 +354,10 @@
     "/adminReadState/{readingId}": {
       "schema": "AdminReadState",
       "description": "Admin inbox read state keyed by allReadings document ID."
+    },
+    "/akashicRequests/{requestId}": {
+      "schema": "AkashicRequest",
+      "description": "User requests for Akashic Records readings."
     }
   }
 }

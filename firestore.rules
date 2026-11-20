@@ -89,6 +89,23 @@ service cloud.firestore {
         && data.get('userData', {}) is map
         && data.get('timestamp', null) == request.time;
     }
+    function validAkashicRequest(data) {
+      return data.keys().hasAll(['ownerUid', 'name', 'email', 'area', 'question', 'hope', 'consentAccepted', 'consentAt', 'status', 'createdAt', 'deletionRequested'])
+        && data.keys().hasOnly(['ownerUid', 'name', 'birthDate', 'email', 'area', 'question', 'hope', 'notes', 'consentAccepted', 'consentAt', 'status', 'createdAt', 'deletionRequested'])
+        && data.ownerUid is string && data.ownerUid == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.get('birthDate', '') is string && data.get('birthDate', '').size() <= 50
+        && data.email is string && data.email.size() >= 1 && data.email.size() <= 200
+        && data.area is string && data.area in ['Amore e relazioni', "Missione dell'anima", 'Blocchi interiori', 'Evoluzione personale', 'Relazioni familiari']
+        && data.question is string && data.question.size() >= 1 && data.question.size() <= 2000
+        && data.hope is string && data.hope.size() >= 1 && data.hope.size() <= 2000
+        && data.get('notes', '') is string && data.get('notes', '').size() <= 2000
+        && data.consentAccepted is bool && data.consentAccepted == true
+        && hasTimestamp(data, 'consentAt')
+        && data.status is string && data.status == 'nuova'
+        && hasTimestamp(data, 'createdAt')
+        && data.deletionRequested is bool && data.deletionRequested == false;
+    }
 
     match /{document=**} { allow read, write: if false; }
 
@@ -136,6 +153,12 @@ service cloud.firestore {
         && request.resource.data.readBy == request.auth.token.email
         && request.resource.data.readAt == request.time;
       allow delete: if isAdmin() && isValidId(readingId);
+    }
+    match /akashicRequests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(requestId) && validAkashicRequest(request.resource.data);
+      allow update, delete: if isAdmin() && isValidId(requestId);
     }
   }
 }

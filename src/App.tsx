@@ -179,6 +179,18 @@ const STAGE_REF_WIDTH = 1600;
 const STAGE_REF_HEIGHT = 900;
 
 const BUILDING_IMAGE_URL = '/assets/aistudio/palazzo-liberty-5_4611a372.webp';
+const BUILDING_HEADER_IMAGE_URL = '/assets/aistudio/palazzo-testata_dbc44ed0.webp';
+const AKASHIC_CARD_IMAGE_URL = '/assets/aistudio/registri-card_20af54de.webp';
+const AKASHIC_HEADER_IMAGE_URL = '/assets/aistudio/registri-testata_fcc679c8.webp';
+const AKASHIC_AREAS = [
+  'Amore e relazioni',
+  "Missione dell'anima",
+  'Blocchi interiori',
+  'Evoluzione personale',
+  'Relazioni familiari'
+] as const;
+const PRIVACY_AKASHIC_TEXT =
+  "I dati personali inseriti in questo modulo (nome e cognome, eventuale data di nascita, indirizzo email, area di interesse e risposte alle domande) sono trattati esclusivamente da GraziaMaria Infantino per preparare e comunicare la lettura dei Registri Akashici richiesta. I dati non vengono ceduti a terzi né utilizzati per finalità promozionali. Puoi richiedere in qualsiasi momento l'accesso, la rettifica o la cancellazione dei tuoi dati contattando la titolare del trattamento.";
 const BUILDING_REF_WIDTH = 1000;
 const BUILDING_REF_HEIGHT = 1100;
 const BUILDING_FLOORS = [5, 4, 3, 2, 1] as const;
@@ -1464,7 +1476,22 @@ export default function App() {
   const [tempMemory, setTempMemory] = useState('');
   const [tempFeeling, setTempFeeling] = useState<'piacevole' | 'spiacevole' | null>(null);
   const [userData, setUserData] = useState({ ...INITIAL_USER_DATA });
-  const [currentPage, setCurrentPage] = useState<'home' | 'costellazioni' | 'fiori' | 'rune' | 'percorsi' | 'profile' | 'admin'>('home');
+  const [currentPage, setCurrentPage] = useState<'home' | 'costellazioni' | 'fiori' | 'rune' | 'percorsi' | 'registri' | 'profile' | 'admin'>('home');
+  const [showAkashicForm, setShowAkashicForm] = useState(false);
+  const [showAkashicPrivacy, setShowAkashicPrivacy] = useState(false);
+  const [akashicSubmitted, setAkashicSubmitted] = useState(false);
+  const [isSubmittingAkashic, setIsSubmittingAkashic] = useState(false);
+  const [akashicForm, setAkashicForm] = useState({
+    name: '',
+    birthDate: '',
+    email: '',
+    area: '' as (typeof AKASHIC_AREAS)[number] | '',
+    question: '',
+    hope: '',
+    notes: '',
+    consentAccepted: false
+  });
+  const pendingAkashicAfterLoginRef = useRef<boolean>(false);
   const [adminData, setAdminData] = useState<{ candidacies: any[], readings: any[] }>({ candidacies: [], readings: [] });
   const [adminReadMap, setAdminReadMap] = useState<Record<string, { readBy?: string; readAt?: any }>>({});
   const [expandedAdminReadingIds, setExpandedAdminReadingIds] = useState<Record<string, boolean>>({});
@@ -2921,6 +2948,125 @@ export default function App() {
     }
   }, [user, currentPage]);
 
+  const openAkashicForm = (activeUser: User | null = user) => {
+    if (!activeUser) {
+      showConfirm(
+        'Accesso richiesto',
+        'Per richiedere la tua lettura dei Registri Akashici devi accedere.',
+        async () => {
+          pendingAkashicAfterLoginRef.current = true;
+          await login();
+          if (!auth.currentUser) {
+            pendingAkashicAfterLoginRef.current = false;
+          }
+        },
+        {
+          confirmLabel: 'Accedi',
+          cancelLabel: 'Annulla',
+          onCancel: () => {
+            pendingAkashicAfterLoginRef.current = false;
+          },
+          onDismiss: () => {
+            pendingAkashicAfterLoginRef.current = false;
+          }
+        }
+      );
+      return;
+    }
+    setAkashicForm(prev => ({
+      ...prev,
+      email: prev.email || activeUser.email || ''
+    }));
+    setAkashicSubmitted(false);
+    setShowAkashicForm(true);
+  };
+
+  useEffect(() => {
+    if (user && pendingAkashicAfterLoginRef.current) {
+      pendingAkashicAfterLoginRef.current = false;
+      if (currentPage === 'registri') {
+        setAkashicForm(prev => ({
+          ...prev,
+          email: prev.email || user.email || ''
+        }));
+        setAkashicSubmitted(false);
+        setShowAkashicForm(true);
+      }
+    }
+  }, [user, currentPage]);
+
+  const isAkashicEmailValid = (emailValue: string) => {
+    const trimmed = emailValue.trim();
+    return trimmed.length > 0 && trimmed.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  };
+
+  const isAkashicFormValid =
+    akashicForm.name.trim().length > 0 &&
+    akashicForm.name.trim().length <= 100 &&
+    isAkashicEmailValid(akashicForm.email) &&
+    AKASHIC_AREAS.includes(akashicForm.area as (typeof AKASHIC_AREAS)[number]) &&
+    akashicForm.question.trim().length > 0 &&
+    akashicForm.question.trim().length <= 2000 &&
+    akashicForm.hope.trim().length > 0 &&
+    akashicForm.hope.trim().length <= 2000 &&
+    akashicForm.birthDate.trim().length <= 50 &&
+    akashicForm.notes.trim().length <= 2000 &&
+    akashicForm.consentAccepted === true;
+
+  const handleSubmitAkashicRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmittingAkashic) return;
+    if (!user) {
+      openAkashicForm(null);
+      return;
+    }
+    if (!isAkashicFormValid) return;
+
+    setIsSubmittingAkashic(true);
+    try {
+      const trimmedBirthDate = akashicForm.birthDate.trim();
+      const trimmedNotes = akashicForm.notes.trim();
+      const payload: Record<string, any> = {
+        ownerUid: user.uid,
+        name: akashicForm.name.trim().slice(0, 100),
+        ...(trimmedBirthDate ? { birthDate: trimmedBirthDate.slice(0, 50) } : {}),
+        email: akashicForm.email.trim().slice(0, 200),
+        area: akashicForm.area,
+        question: akashicForm.question.trim().slice(0, 2000),
+        hope: akashicForm.hope.trim().slice(0, 2000),
+        ...(trimmedNotes ? { notes: trimmedNotes.slice(0, 2000) } : {}),
+        consentAccepted: true,
+        consentAt: serverTimestamp(),
+        status: 'nuova',
+        createdAt: serverTimestamp(),
+        deletionRequested: false
+      };
+      await addDoc(collection(db, 'akashicRequests'), payload);
+      setAkashicSubmitted(true);
+      setShowAkashicForm(false);
+      setShowAkashicPrivacy(false);
+      setAkashicForm({
+        name: '',
+        birthDate: '',
+        email: user.email || '',
+        area: '',
+        question: '',
+        hope: '',
+        notes: '',
+        consentAccepted: false
+      });
+    } catch (error) {
+      try {
+        handleFirestoreError(error, 'create', 'akashicRequests');
+      } catch (structuredErr) {
+        console.error('Errore invio Registri Akashici:', structuredErr);
+      }
+      showAlert('Errore invio', 'Non è stato possibile inviare la richiesta. Riprova tra poco.');
+    } finally {
+      setIsSubmittingAkashic(false);
+    }
+  };
+
   const toggleFlowerSelection = (id: number) => {
     setSelectedFlowersIds(prev => 
       prev.includes(id) ? prev.filter(fid => fid !== id) : [...prev, id]
@@ -4003,15 +4149,34 @@ export default function App() {
                 onClick={() => setCurrentPage('costellazioni')}
                 className="bg-white p-8 rounded-[2.5rem] shadow-lg border border-[#e5e0d8] flex flex-col items-center text-center gap-4 hover:shadow-xl transition-all group relative overflow-hidden"
               >
-                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                  <img src="/fiori/00_Personaggi.webp" alt="" className="w-24 h-24 object-contain" />
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity flex items-center gap-2">
+                  <img src="/fiori/00_Personaggi.webp" alt="" className="w-16 h-16 object-contain" />
+                  <img src={BUILDING_HEADER_IMAGE_URL} alt="" className="w-16 h-16 object-contain" />
                 </div>
-                <div className="w-16 h-16 bg-[#f8f5f0] rounded-2xl flex items-center justify-center overflow-hidden group-hover:bg-[#c2b280] transition-colors z-10 p-2">
-                  <img src="/fiori/00_Personaggi.webp" alt="Costellazioni" className="w-full h-full object-contain" />
+                <div className="flex items-center justify-center gap-3 z-10">
+                  <div className="w-16 h-16 bg-[#f8f5f0] rounded-2xl flex items-center justify-center overflow-hidden group-hover:bg-[#c2b280] transition-colors p-2">
+                    <motion.img
+                      src="/fiori/00_Personaggi.webp"
+                      alt="Costellazioni Gradini"
+                      className="w-full h-full object-contain"
+                      animate={{ opacity: [1, 0.2, 1] }}
+                      transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                  </div>
+                  <div className="w-16 h-16 bg-[#f8f5f0] rounded-2xl flex items-center justify-center overflow-hidden group-hover:bg-[#c2b280] transition-colors p-2">
+                    <motion.img
+                      src={BUILDING_HEADER_IMAGE_URL}
+                      alt="Costellazioni Palazzo"
+                      className="w-full h-full object-contain"
+                      animate={{ opacity: [1, 0.2, 1] }}
+                      transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                  </div>
                 </div>
                 <div className="z-10">
                   <h3 className="font-serif italic text-2xl mb-2">Costellazioni</h3>
                   <p className="text-xs opacity-60 uppercase tracking-widest font-bold">Simulazione Interattiva per Diagnosi Olistica</p>
+                  <p className="text-[11px] text-[#5a5a40] font-semibold mt-2">Posizionamento su &quot;Gradini&quot; o &quot;Palazzo&quot;</p>
                 </div>
               </motion.button>
 
@@ -4048,6 +4213,29 @@ export default function App() {
                 <div className="z-10">
                   <h3 className="font-serif italic text-2xl mb-2">Rune</h3>
                   <p className="text-xs opacity-60 uppercase tracking-widest font-bold">Antica Saggezza Simbolica</p>
+                </div>
+              </motion.button>
+
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => {
+                  setShowAkashicForm(false);
+                  setShowAkashicPrivacy(false);
+                  setAkashicSubmitted(false);
+                  setCurrentPage('registri');
+                }}
+                className="bg-white p-8 rounded-[2.5rem] shadow-lg border border-[#e5e0d8] flex flex-col items-center text-center gap-4 hover:shadow-xl transition-all group relative overflow-hidden sm:col-span-2"
+              >
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <img src={AKASHIC_CARD_IMAGE_URL} alt="" className="w-24 h-24 object-cover rounded-2xl" />
+                </div>
+                <div className="w-16 h-16 bg-[#f8f5f0] rounded-2xl flex items-center justify-center overflow-hidden group-hover:bg-[#c2b280] transition-colors z-10 p-1">
+                  <img src={AKASHIC_CARD_IMAGE_URL} alt="IL LIBRO DELLA TUA ANIMA" className="w-full h-full object-cover rounded-xl" />
+                </div>
+                <div className="z-10">
+                  <h3 className="font-serif italic text-2xl mb-2">IL LIBRO DELLA TUA ANIMA</h3>
+                  <p className="text-xs opacity-60 uppercase tracking-widest font-bold">A cura di GraziaMaria Infantino</p>
                 </div>
               </motion.button>
             </div>
@@ -4184,8 +4372,8 @@ export default function App() {
                   <h1 className="font-serif italic tracking-tight" style={{ color: '#090909', fontSize: '28px', lineHeight: '26px', fontWeight: 'bold' }}>Costellazioni</h1>
                   <p className="uppercase tracking-[0.2em]" style={{ color: '#5a5a40', fontSize: '10px', fontWeight: 'bold' }}>Simulazione Interattiva per Diagnosi Olistica</p>
                   <img 
-                    src="/fiori/00_Personaggi.webp" 
-                    alt="Personaggi" 
+                    src={constellationLayoutType === 'building' ? BUILDING_HEADER_IMAGE_URL : '/fiori/00_Personaggi.webp'} 
+                    alt={constellationLayoutType === 'building' ? 'Palazzo Costellazione' : 'Personaggi'} 
                     className="mt-4 object-contain mx-auto"
                     style={{ width: '186.45px', height: '102px' }}
                     referrerPolicy="no-referrer"
@@ -4247,11 +4435,17 @@ export default function App() {
                   </span>
                 </button>
                 <div className="hidden md:block font-bold text-[#5a5a40] mb-1 tracking-widest uppercase" style={{ fontSize: '9px' }}>COME FUNZIONA?</div>
-                <p className={`${showCostellazioniHelp ? 'block mt-2' : 'hidden'} md:block md:mt-0 opacity-90 text-justify`} style={{ color: '#100b06' }}>
-                  Avrai a disposizione 30 "personaggi" di varie misure, colori e forme. Cliccando sul bottone "Scegli" potrai visualizzarli tutti e sceglierli per poi posizionarne quanti ne vuoi, uno per uno. Cliccando su "Casuale" il sistema sceglierà il personaggio che dovrai, poi, nominare e posizionare.<br />
-                  Clicca il "bottone" che hai deciso (Scegli o Casuale), nomina il personaggio, trascina il personaggio e posizionalo dove vuoi, puoi sceglierne quanti ne vuoi. Quando hai finito fai uno screenshot. Poi clicca sul bottone "Termina Posizionamento" e segui le istruzioni successive. Quando avrai terminato, potrai salvare il tutto nel report, scaricarlo e inviarlo a Graziamaria.<br />
-                  Quando descrivi dove si trova una figura (nelle memorie o nei messaggi), usa destra e sinistra dal punto di vista del pupazzo Io, non dello schermo.
-                </p>
+                <div className={`${showCostellazioniHelp ? 'block mt-2' : 'hidden'} md:block md:mt-0 opacity-90 text-justify space-y-1.5`} style={{ color: '#100b06' }}>
+                  <p>
+                    Scegli la scena: Gradini oppure Palazzo (10 piani sono troppi: il Palazzo ha 5 piani con 5 finestre ciascuno, una finestra per figura). Avrai a disposizione 30 personaggi di varie misure, colori e forme. Con il bottone “Scegli” li vedi tutti e scegli quelli che ti servono, uno per uno; con “Casuale” il sistema sceglie il personaggio per te. Ogni personaggio si usa una volta sola.
+                  </p>
+                  <p>
+                    Nomina il personaggio, poi posizionalo: sui Gradini trascinalo dove vuoi; nel Palazzo toccalo e poi tocca una finestra libera, oppure trascinalo sulla finestra (una sola figura per finestra). Puoi spostare o modificare le figure già posizionate. Quando hai finito fai uno screenshot, poi premi “Termina posizionamento” e segui le istruzioni. Alla fine puoi salvare il tutto nel report, scaricarlo e inviarlo a Graziamaria con “Invia a Graziamaria”.
+                  </p>
+                  <p>
+                    Quando descrivi dove si trova una figura (nelle memorie o nei messaggi), usa destra e sinistra dal punto di vista del pupazzo Io, non dello schermo. Nel Palazzo indica il piano contando dal basso.
+                  </p>
+                </div>
               </div>
               
               <div className="flex items-center gap-3 w-full max-w-4xl justify-center flex-wrap mt-2">
@@ -5511,6 +5705,287 @@ export default function App() {
                 </button>
               </section>
             </main>
+          </motion.div>
+        ) : currentPage === 'registri' ? (
+          <motion.div
+            key="registri"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="flex-1 flex flex-col p-4 sm:p-8 overflow-y-auto"
+          >
+            <div className="max-w-4xl mx-auto w-full pb-20">
+              <div className="flex items-center justify-between mb-6">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage('home')}
+                  className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#5a5a40] hover:text-[#c2b280] transition-colors"
+                >
+                  <X size={16} /> Home
+                </button>
+              </div>
+
+              <div className="w-full rounded-[2rem] overflow-hidden shadow-lg border border-[#e5e0d8] mb-8 bg-white">
+                <img
+                  src={AKASHIC_HEADER_IMAGE_URL}
+                  alt="I Registri Akashici"
+                  className="w-full h-auto object-cover block"
+                />
+              </div>
+
+              <header className="text-center mb-10 px-2">
+                <h1 className="font-serif italic text-3xl sm:text-5xl text-[#c2b280] mb-3 tracking-tight">
+                  I REGISTRI AKASHICI
+                </h1>
+                <p className="font-serif italic text-lg sm:text-xl text-[#5a5a40] mb-6">
+                  Un viaggio di ascolto, conoscenza e consapevolezza dell&apos;anima.
+                </p>
+                <div className="bg-white/80 backdrop-blur-sm p-6 sm:p-10 rounded-[2rem] border border-[#e5e0d8] shadow-sm text-left sm:text-center">
+                  <p className="text-[#4a3f35] leading-relaxed text-sm sm:text-base opacity-90">
+                    Secondo la tradizione spirituale, i Registri Akashici rappresentano un archivio simbolico della memoria dell&apos;anima. Attraverso questa esperienza di introspezione potrai dedicarti all&apos;ascolto interiore, esplorare le domande che porti dentro di te e aprirti a nuove prospettive di consapevolezza.
+                  </p>
+                  {!showAkashicForm && !akashicSubmitted && (
+                    <div className="mt-8 flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => openAkashicForm()}
+                        className="px-8 py-4 bg-[#c2b280] text-white rounded-full font-bold uppercase tracking-widest text-xs hover:bg-[#b1a170] transition-all shadow-lg active:scale-95 flex items-center gap-2.5"
+                      >
+                        <BookOpen size={16} />
+                        <span>RICHIEDI LA TUA LETTURA</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </header>
+
+              {akashicSubmitted && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-[#fdfbf7] border-2 border-[#c2b280]/50 rounded-[2rem] p-6 sm:p-10 shadow-md text-center space-y-6"
+                >
+                  <div className="w-14 h-14 mx-auto rounded-full bg-[#c2b280]/15 text-[#c2b280] flex items-center justify-center">
+                    <Heart size={26} />
+                  </div>
+                  <p className="font-serif italic text-xl sm:text-2xl text-[#4a3f35] leading-relaxed max-w-2xl mx-auto">
+                    La tua richiesta è stata ricevuta con amore. GraziaMaria si prenderà il tempo necessario per preparare personalmente la tua lettura. Riceverai una comunicazione quando sarà pronta.
+                  </p>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage('home')}
+                      className="px-8 py-3 bg-[#4a3f35] text-white rounded-full text-xs font-bold uppercase tracking-widest hover:bg-[#3a2f25] transition-all shadow-md"
+                    >
+                      Home
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+              {showAkashicForm && user && !akashicSubmitted && (
+                <motion.form
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  onSubmit={handleSubmitAkashicRequest}
+                  className="bg-white rounded-[2rem] border border-[#e5e0d8] shadow-lg p-6 sm:p-10 space-y-6"
+                >
+                  <div className="border-b border-[#e5e0d8] pb-4">
+                    <h2 className="font-serif italic text-2xl sm:text-3xl text-[#4a3f35]">
+                      Modulo di Richiesta
+                    </h2>
+                    <p className="text-xs text-[#5a5a40] mt-1">
+                      Compila i campi con calma e ascolto interiore. I campi contrassegnati con * sono obbligatori.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div className="space-y-1.5">
+                      <label htmlFor="akashic-name" className="block text-[11px] font-bold uppercase tracking-wider text-[#5a5a40]">
+                        Nome e cognome *
+                      </label>
+                      <input
+                        id="akashic-name"
+                        type="text"
+                        required
+                        maxLength={100}
+                        value={akashicForm.name}
+                        onChange={(e) => setAkashicForm(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="Il tuo nome e cognome"
+                        className="w-full px-4 py-3 bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280]"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label htmlFor="akashic-birth-date" className="block text-[11px] font-bold uppercase tracking-wider text-[#5a5a40]">
+                        Data di nascita (facoltativa)
+                      </label>
+                      <input
+                        id="akashic-birth-date"
+                        type="date"
+                        maxLength={50}
+                        value={akashicForm.birthDate}
+                        onChange={(e) => setAkashicForm(prev => ({ ...prev, birthDate: e.target.value }))}
+                        className="w-full px-4 py-3 bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="akashic-email" className="block text-[11px] font-bold uppercase tracking-wider text-[#5a5a40]">
+                      Indirizzo email *
+                    </label>
+                    <input
+                      id="akashic-email"
+                      type="email"
+                      required
+                      maxLength={200}
+                      value={akashicForm.email}
+                      onChange={(e) => setAkashicForm(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="nome@esempio.it"
+                      className="w-full px-4 py-3 bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280]"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider text-[#5a5a40]">
+                      Area che desidera esplorare *
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {AKASHIC_AREAS.map((areaOption) => {
+                        const isSelected = akashicForm.area === areaOption;
+                        return (
+                          <button
+                            key={areaOption}
+                            type="button"
+                            onClick={() => setAkashicForm(prev => ({ ...prev, area: areaOption }))}
+                            className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-left text-sm transition-all ${
+                              isSelected
+                                ? 'bg-[#c2b280]/15 border-[#c2b280] text-[#4a3f35] font-semibold shadow-sm'
+                                : 'bg-[#fdfbf7] border-[#e5e0d8] text-[#4a3f35]/80 hover:border-[#c2b280]/60'
+                            }`}
+                          >
+                            <span
+                              className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                                isSelected ? 'border-[#c2b280] bg-[#c2b280]' : 'border-[#c2b280]/60 bg-white'
+                              }`}
+                            >
+                              {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                            </span>
+                            <span>{areaOption}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="akashic-question" className="block text-[11px] font-bold uppercase tracking-wider text-[#5a5a40]">
+                      Qual è la domanda che porti dentro di te? *
+                    </label>
+                    <textarea
+                      id="akashic-question"
+                      required
+                      maxLength={2000}
+                      rows={4}
+                      value={akashicForm.question}
+                      onChange={(e) => setAkashicForm(prev => ({ ...prev, question: e.target.value }))}
+                      placeholder="Scrivi qui la tua domanda..."
+                      className="w-full px-4 py-3 bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280] resize-y"
+                    />
+                    <p className="text-[10px] text-[#5a5a40]/60 text-right">
+                      {akashicForm.question.length}/2000
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="akashic-hope" className="block text-[11px] font-bold uppercase tracking-wider text-[#5a5a40]">
+                      Cosa ti auguri di trovare attraverso questa esperienza? *
+                    </label>
+                    <textarea
+                      id="akashic-hope"
+                      required
+                      maxLength={2000}
+                      rows={4}
+                      value={akashicForm.hope}
+                      onChange={(e) => setAkashicForm(prev => ({ ...prev, hope: e.target.value }))}
+                      placeholder="Racconta cosa desideri comprendere o accogliere..."
+                      className="w-full px-4 py-3 bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280] resize-y"
+                    />
+                    <p className="text-[10px] text-[#5a5a40]/60 text-right">
+                      {akashicForm.hope.length}/2000
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="akashic-notes" className="block text-[11px] font-bold uppercase tracking-wider text-[#5a5a40]">
+                      Eventuali informazioni aggiuntive (facoltative)
+                    </label>
+                    <textarea
+                      id="akashic-notes"
+                      maxLength={2000}
+                      rows={3}
+                      value={akashicForm.notes}
+                      onChange={(e) => setAkashicForm(prev => ({ ...prev, notes: e.target.value }))}
+                      placeholder="Aggiungi eventuali dettagli o contesto utile..."
+                      className="w-full px-4 py-3 bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl text-sm text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280] resize-y"
+                    />
+                    <p className="text-[10px] text-[#5a5a40]/60 text-right">
+                      {akashicForm.notes.length}/2000
+                    </p>
+                  </div>
+
+                  <div className="bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl p-4 space-y-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={akashicForm.consentAccepted}
+                        onChange={(e) => setAkashicForm(prev => ({ ...prev, consentAccepted: e.target.checked }))}
+                        className="mt-1 w-4 h-4 accent-[#c2b280] shrink-0"
+                      />
+                      <span className="text-xs text-[#4a3f35] leading-relaxed">
+                        Acconsento al trattamento dei dati personali secondo l&apos;
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setShowAkashicPrivacy(prev => !prev);
+                          }}
+                          className="underline font-bold text-[#c2b280] hover:text-[#b1a170]"
+                        >
+                          Informativa sulla privacy
+                        </button>
+                        . *
+                      </span>
+                    </label>
+
+                    {showAkashicPrivacy && (
+                      <div className="p-3.5 bg-white border border-[#e5e0d8] rounded-xl text-xs text-[#4a3f35]/90 leading-relaxed">
+                        {PRIVACY_AKASHIC_TEXT}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowAkashicForm(false)}
+                      className="w-full sm:w-auto px-6 py-3 rounded-full border border-[#e5e0d8] text-xs font-bold uppercase tracking-wider text-[#5a5a40] hover:bg-[#f8f5f0] transition-colors"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!isAkashicFormValid || isSubmittingAkashic}
+                      className="w-full sm:w-auto px-8 py-4 bg-[#c2b280] text-white rounded-full text-xs font-bold uppercase tracking-widest shadow-lg hover:bg-[#b1a170] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      <Send size={15} />
+                      <span>{isSubmittingAkashic ? 'Invio in corso...' : 'INVIA LA TUA RICHIESTA'}</span>
+                    </button>
+                  </div>
+                </motion.form>
+              )}
+            </div>
           </motion.div>
         ) : currentPage === 'profile' && user ? (
           <motion.div 
