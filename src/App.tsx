@@ -159,6 +159,8 @@ const CHARACTER_PICKER_ORDER = [
 
 const CHARACTER_PICKER_SHAPES = CHARACTER_PICKER_ORDER.map(i => CHARACTER_SHAPES[i]);
 
+const getCharacterShapeColorKey = (shape: string, color: string) => `${shape}::${color.toLowerCase()}`;
+
 const PREDEFINED_LABELS = [
   "Io", "Mamma", "Papà", "Fratello", "Sorella", "Nonno", "Nonna", 
   "Partner", "Figlio", "Figlia", "Amico", "Lavoro", "Paura", "Sogno"
@@ -1424,6 +1426,26 @@ export default function App() {
   const [tempLabel, setTempLabel] = useState('');
   const [showLabelInput, setShowLabelInput] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const availablePickerShapes = React.useMemo(() => {
+    const usedCounts = new Map<string, number>();
+    for (const ch of characters) {
+      const key = getCharacterShapeColorKey(ch.shape, ch.color);
+      usedCounts.set(key, (usedCounts.get(key) || 0) + 1);
+    }
+    if (pendingCharacter) {
+      const key = getCharacterShapeColorKey(pendingCharacter.shape, pendingCharacter.color);
+      usedCounts.set(key, (usedCounts.get(key) || 0) + 1);
+    }
+    return CHARACTER_PICKER_SHAPES.filter((char) => {
+      const key = getCharacterShapeColorKey(char.shape, char.color);
+      const remaining = usedCounts.get(key) || 0;
+      if (remaining > 0) {
+        usedCounts.set(key, remaining - 1);
+        return false;
+      }
+      return true;
+    });
+  }, [characters, pendingCharacter]);
   const [isSharing, setIsSharing] = useState(false);
   const [workflowStep, setWorkflowStep] = useState(0); // 0: Placement, 1: Analysis
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
@@ -2563,13 +2585,13 @@ export default function App() {
   };
 
   const handleDraw = () => {
-    if (pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES) return;
-    const randomShape = CHARACTER_SHAPES[Math.floor(Math.random() * CHARACTER_SHAPES.length)];
+    if (pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES || availablePickerShapes.length === 0) return;
+    const randomShape = availablePickerShapes[Math.floor(Math.random() * availablePickerShapes.length)];
     selectCharacter(randomShape);
   };
 
   const selectCharacter = (char: typeof CHARACTER_SHAPES[number]) => {
-    if (pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES) return;
+    if (pendingCharacter || characters.length >= MAX_CONSTELLATION_FIGURES || availablePickerShapes.length === 0) return;
     setPendingCharacter({
       id: Math.random().toString(36).substr(2, 9),
       shape: char.shape as CharacterType['shape'],
@@ -4216,7 +4238,7 @@ export default function App() {
                 <div className="flex gap-2">
                   <button 
                     onClick={() => setShowPicker(true)}
-                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= MAX_CONSTELLATION_FIGURES}
+                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= MAX_CONSTELLATION_FIGURES || availablePickerShapes.length === 0}
                     className="flex items-center justify-center gap-2 bg-[#c2b280] text-white transition-all shadow-md hover:bg-[#b1a170] disabled:opacity-30 disabled:cursor-not-allowed px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                     translate="no"
                   >
@@ -4225,7 +4247,7 @@ export default function App() {
 
                   <button 
                     onClick={handleDraw}
-                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= MAX_CONSTELLATION_FIGURES}
+                    disabled={Boolean(pendingCharacter) || showLabelInput || showPicker || workflowStep === 1 || characters.length >= MAX_CONSTELLATION_FIGURES || availablePickerShapes.length === 0}
                     className="flex items-center justify-center gap-2 bg-[#e5e0d8] text-[#5a5a40] transition-all shadow-md hover:bg-[#d5d0c8] disabled:opacity-30 disabled:cursor-not-allowed px-6 h-10 rounded-full text-xs font-bold uppercase tracking-wider"
                     translate="no"
                   >
@@ -4297,6 +4319,11 @@ export default function App() {
                   </button>
                 </div>
               </div>
+              {!pendingCharacter && availablePickerShapes.length === 0 && (
+                <div className="text-[11px] font-medium text-[#8c7a6b] bg-[#f8f5f0] border border-[#e5e0d8] px-3 py-1 rounded-full">
+                  Hai già usato tutti i personaggi
+                </div>
+              )}
             </header>
 
             {/* Main Game Area */}
@@ -6029,17 +6056,23 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2 sm:gap-4 max-h-[60vh] overflow-y-auto p-1 sm:p-2">
-                {CHARACTER_PICKER_SHAPES.map((char, index) => (
-                  <button
-                    key={index}
-                    onClick={() => selectCharacter(char)}
-                    className="flex flex-col items-center p-2 sm:p-4 rounded-xl sm:rounded-2xl hover:bg-[#f8f5f0] border border-transparent hover:border-[#e5e0d8] transition-all group"
-                  >
-                    <div className="transform group-hover:scale-110 transition-transform">
-                      {renderShape(char.shape, char.color, 'small')}
-                    </div>
-                  </button>
-                ))}
+                {availablePickerShapes.length === 0 ? (
+                  <p className="col-span-full text-center text-sm text-[#8c7a6b] py-6">
+                    Hai già usato tutti i personaggi
+                  </p>
+                ) : (
+                  availablePickerShapes.map((char, index) => (
+                    <button
+                      key={`${char.shape}-${char.color}-${index}`}
+                      onClick={() => selectCharacter(char)}
+                      className="flex flex-col items-center p-2 sm:p-4 rounded-xl sm:rounded-2xl hover:bg-[#f8f5f0] border border-transparent hover:border-[#e5e0d8] transition-all group"
+                    >
+                      <div className="transform group-hover:scale-110 transition-transform">
+                        {renderShape(char.shape, char.color, 'small')}
+                      </div>
+                    </button>
+                  ))
+                )}
               </div>
             </motion.div>
           </motion.div>
