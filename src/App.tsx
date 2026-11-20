@@ -4996,11 +4996,11 @@ export default function App() {
                   <img src={AKASHIC_CARD_IMAGE_URL} alt="" className="w-24 h-24 object-cover rounded-2xl" />
                 </div>
                 <div className="w-16 h-16 bg-[#f8f5f0] rounded-2xl flex items-center justify-center overflow-hidden group-hover:bg-[#c2b280] transition-colors z-10 p-1">
-                  <img src={AKASHIC_CARD_IMAGE_URL} alt="IL LIBRO DELLA TUA ANIMA" className="w-full h-full object-cover rounded-xl" />
+                  <img src={AKASHIC_CARD_IMAGE_URL} alt="Il Libro della tua Anima" className="w-full h-full object-cover rounded-xl" />
                 </div>
                 <div className="z-10">
-                  <h3 className="font-serif italic text-2xl mb-2">IL LIBRO DELLA TUA ANIMA</h3>
-                  <p className="text-xs opacity-60 uppercase tracking-widest font-bold">A cura di GraziaMaria Infantino</p>
+                  <h3 className="font-serif italic text-2xl mb-2">Il Libro della tua Anima</h3>
+                  <p className="text-xs opacity-60 uppercase tracking-widest font-bold">Archivio dell&apos;Anima</p>
                 </div>
               </motion.button>
             </div>
