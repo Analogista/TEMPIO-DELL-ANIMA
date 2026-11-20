@@ -664,38 +664,6 @@ function computePillLayout(characters: CharacterType[], stageWidth: number): Pil
   };
 }
 
-function splitWhatsAppLegendMessages(text: string, maxChars: number = 1500): string[] {
-  if (text.length <= maxChars) return [text];
-  const lines = text.split('\n');
-  const rawChunks: string[] = [];
-  const effectiveLimit = maxChars - 16;
-  let current = '';
-
-  for (const line of lines) {
-    if (line.length > effectiveLimit) {
-      if (current) {
-        rawChunks.push(current);
-        current = '';
-      }
-      for (let start = 0; start < line.length; start += effectiveLimit) {
-        rawChunks.push(line.slice(start, start + effectiveLimit));
-      }
-      continue;
-    }
-    const candidate = current ? `${current}\n${line}` : line;
-    if (candidate.length <= effectiveLimit) {
-      current = candidate;
-    } else {
-      if (current) rawChunks.push(current);
-      current = line;
-    }
-  }
-  if (current) rawChunks.push(current);
-
-  if (rawChunks.length <= 1) return rawChunks;
-  return rawChunks.map((chunk, idx) => `(${idx + 1}/${rawChunks.length})\n${chunk}`);
-}
-
 function getReadingTimestampMillis(read: any): number {
   if (read?.timestamp?.toMillis) return read.timestamp.toMillis();
   if (read?.timestamp?.seconds) return read.timestamp.seconds * 1000;
@@ -1270,6 +1238,9 @@ export default function App() {
   const [userData, setUserData] = useState({ ...INITIAL_USER_DATA });
   const [currentPage, setCurrentPage] = useState<'home' | 'costellazioni' | 'fiori' | 'rune' | 'percorsi' | 'profile' | 'admin'>('home');
   const [adminData, setAdminData] = useState<{ candidacies: any[], readings: any[] }>({ candidacies: [], readings: [] });
+  const [adminReadMap, setAdminReadMap] = useState<Record<string, { readBy?: string; readAt?: any }>>({});
+  const [expandedAdminReadingIds, setExpandedAdminReadingIds] = useState<Record<string, boolean>>({});
+  const [adminSearchQuery, setAdminSearchQuery] = useState('');
   const [selectedCandidacies, setSelectedCandidacies] = useState<string[]>([]);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -1296,14 +1267,10 @@ export default function App() {
     onDismiss?: () => void | Promise<void>;
     onClose?: () => void | Promise<void>;
   } | null>(null);
-  const [shareLegendModal, setShareLegendModal] = useState<{
-    messages: string[];
-    fullText: string;
-    imageStatus: 'preparing' | 'ready' | 'error';
+  const [sentToGraziamariaModal, setSentToGraziamariaModal] = useState<{
     imageBlob: Blob | null;
-    previewUrl: string | null;
   } | null>(null);
-  const shareGenerationIdRef = useRef<number>(0);
+  const pendingShareAfterLoginRef = useRef<boolean>(false);
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
 
   const showAlert = (title: string, message: string, onClose?: () => void | Promise<void>) => {
@@ -1380,10 +1347,78 @@ export default function App() {
         candidacies: cSnap.docs.map(d => ({ id: d.id, ...d.data() })),
         readings: rSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       });
+
+      try {
+        const readStateSnap = await getDocs(collection(db, 'adminReadState'));
+        const nextReadMap: Record<string, { readBy?: string; readAt?: any }> = {};
+        readStateSnap.docs.forEach(d => {
+          nextReadMap[d.id] = d.data() as { readBy?: string; readAt?: any };
+        });
+        setAdminReadMap(nextReadMap);
+      } catch (readStateErr) {
+        console.error("Admin read state fetch error:", readStateErr);
+      }
     } catch (e) {
       console.error("Admin Fetch Error:", e);
     } finally {
       setIsAdminLoading(false);
+    }
+  };
+
+  const markReadingAsRead = async (readingId: string) => {
+    if (!isAdmin || !user || adminReadMap[readingId]) return;
+    const readerEmail = user.email || '';
+    setAdminReadMap(prev => ({
+      ...prev,
+      [readingId]: { readBy: readerEmail, readAt: new Date() }
+    }));
+    try {
+      await setDoc(doc(db, 'adminReadState', readingId), {
+        readBy: readerEmail,
+        readAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.error('Errore salvataggio stato lettura admin:', e);
+      setAdminReadMap(prev => {
+        const next = { ...prev };
+        delete next[readingId];
+        return next;
+      });
+    }
+  };
+
+  const markReadingAsUnread = async (readingId: string) => {
+    if (!isAdmin || !user) return;
+    const previousEntry = adminReadMap[readingId];
+    setAdminReadMap(prev => {
+      const next = { ...prev };
+      delete next[readingId];
+      return next;
+    });
+    setExpandedAdminReadingIds(prev => {
+      if (!prev[readingId]) return prev;
+      const next = { ...prev };
+      delete next[readingId];
+      return next;
+    });
+    try {
+      await deleteDoc(doc(db, 'adminReadState', readingId));
+    } catch (e) {
+      console.error('Errore ripristino stato da vedere:', e);
+      if (previousEntry) {
+        setAdminReadMap(prev => ({ ...prev, [readingId]: previousEntry }));
+      }
+    }
+  };
+
+  const toggleAdminReadingExpanded = (readingId: string) => {
+    const isCurrentlyExpanded = Boolean(expandedAdminReadingIds[readingId]);
+    setExpandedAdminReadingIds(prev => ({
+      ...prev,
+      [readingId]: !isCurrentlyExpanded
+    }));
+    if (!isCurrentlyExpanded && !adminReadMap[readingId]) {
+      void markReadingAsRead(readingId);
     }
   };
 
@@ -1465,10 +1500,27 @@ export default function App() {
           }
 
           const deletedIds = new Set(groupToDelete.map(item => item.id));
+          await Promise.allSettled(
+            Array.from(deletedIds).map(id => deleteDoc(doc(db, 'adminReadState', id)))
+          );
           setAdminData(prev => ({
             ...prev,
             readings: prev.readings.filter(item => !deletedIds.has(item.id))
           }));
+          setAdminReadMap(prev => {
+            const next = { ...prev };
+            deletedIds.forEach(id => {
+              delete next[id];
+            });
+            return next;
+          });
+          setExpandedAdminReadingIds(prev => {
+            const next = { ...prev };
+            deletedIds.forEach(id => {
+              delete next[id];
+            });
+            return next;
+          });
         } catch (error) {
           console.error('Errore eliminazione lettura:', error);
           showAlert('Errore eliminazione', 'Non è stato possibile eliminare la lettura dall’area admin.');
@@ -1519,6 +1571,9 @@ export default function App() {
     setFlowerHistory([]);
     setConstellationHistory([]);
     setAdminData({ candidacies: [], readings: [] });
+    setAdminReadMap({});
+    setExpandedAdminReadingIds({});
+    setAdminSearchQuery('');
     setSelectedCandidacies([]);
     setIsAdminLoading(false);
     setSelectedRunesIds([]);
@@ -1546,11 +1601,8 @@ export default function App() {
     setShowCandidacyModal(false);
     setSubmissionResult(null);
     setAppDialog(null);
-    shareGenerationIdRef.current += 1;
-    setShareLegendModal((prev) => {
-      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
-      return null;
-    });
+    pendingShareAfterLoginRef.current = false;
+    setSentToGraziamariaModal(null);
     setFullscreenImageUrl(null);
     setUserData({ ...INITIAL_USER_DATA });
     lastSavedRuneKeyRef.current = null;
@@ -2441,41 +2493,13 @@ export default function App() {
     }
   };
 
-  const closeShareLegendModal = () => {
-    shareGenerationIdRef.current += 1;
-    setShareLegendModal((prev) => {
-      if (prev?.previewUrl) {
-        URL.revokeObjectURL(prev.previewUrl);
-      }
-      return null;
-    });
+  const closeSentToGraziamariaModal = () => {
+    setSentToGraziamariaModal(null);
   };
 
-  const handleSendShareImage = async () => {
-    if (!shareLegendModal || shareLegendModal.imageStatus !== 'ready' || !shareLegendModal.imageBlob) {
-      return;
-    }
-    const blob = shareLegendModal.imageBlob;
-    const file = new File([blob], 'costellazione.png', { type: 'image/png' });
-
-    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({
-          files: [file],
-          title: 'La mia Costellazione',
-          text: shareLegendModal.fullText
-        });
-        return;
-      } catch (shareError: any) {
-        if (shareError?.name === 'AbortError') {
-          return;
-        }
-        console.log('Native share failed, falling back to download', shareError);
-      }
-    }
-
-    // Fallback senza navigator.share: scarica il file immagine già pronto
-    const downloadUrl = URL.createObjectURL(blob);
+  const handleDownloadSentImage = () => {
+    if (!sentToGraziamariaModal?.imageBlob) return;
+    const downloadUrl = URL.createObjectURL(sentToGraziamariaModal.imageBlob);
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.download = 'costellazione.png';
@@ -2489,24 +2513,10 @@ export default function App() {
   };
 
   const executeShare = async () => {
-    if (!boardRef.current || isSharing) return;
+    if (!boardRef.current || isSharing || !user) return;
 
     const resolvedChars = resolveCharsWithStair(characters);
-    const legendText = buildWhatsAppLegendText(resolvedChars);
-    const legendMessages = splitWhatsAppLegendMessages(legendText, 1500);
-
-    const genId = ++shareGenerationIdRef.current;
     setIsSharing(true);
-    setShareLegendModal((prev) => {
-      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
-      return {
-        messages: legendMessages,
-        fullText: legendText,
-        imageStatus: 'preparing',
-        imageBlob: null,
-        previewUrl: null
-      };
-    });
 
     const persistShareIfLoggedIn = async (capturedBlob: Blob | null) => {
       if (!user || resolvedChars.length === 0) return;
@@ -2528,63 +2538,55 @@ export default function App() {
 
     try {
       await new Promise(resolve => setTimeout(resolve, 100));
-      const blob = await captureConstellationBlob();
-      const savePromise = persistShareIfLoggedIn(blob);
-
-      if (shareGenerationIdRef.current === genId) {
-        if (blob) {
-          const previewUrl = URL.createObjectURL(blob);
-          setShareLegendModal((prev) => {
-            if (!prev) {
-              URL.revokeObjectURL(previewUrl);
-              return null;
-            }
-            if (prev.previewUrl) URL.revokeObjectURL(prev.previewUrl);
-            return {
-              ...prev,
-              imageStatus: 'ready',
-              imageBlob: blob,
-              previewUrl
-            };
-          });
-        } else {
-          setShareLegendModal((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  imageStatus: 'error',
-                  imageBlob: null,
-                  previewUrl: null
-                }
-              : null
-          );
-        }
+      let blob: Blob | null = null;
+      try {
+        blob = await captureConstellationBlob();
+      } catch (captureError) {
+        console.error('Errore durante la generazione immagine:', captureError);
       }
-
-      await savePromise;
-    } catch (error) {
-      console.error('Errore durante la generazione immagine:', error);
-      await persistShareIfLoggedIn(null);
-      if (shareGenerationIdRef.current === genId) {
-        setShareLegendModal((prev) =>
-          prev
-            ? {
-                ...prev,
-                imageStatus: 'error',
-                imageBlob: null,
-                previewUrl: null
-              }
-            : null
-        );
-      }
+      await persistShareIfLoggedIn(blob);
+      setSentToGraziamariaModal({ imageBlob: blob });
     } finally {
       setIsSharing(false);
     }
   };
 
   const handleShare = () => {
+    if (!user) {
+      showConfirm(
+        'Accesso richiesto',
+        'Per inviare a Graziamaria devi accedere.',
+        async () => {
+          pendingShareAfterLoginRef.current = true;
+          await login();
+          if (!auth.currentUser) {
+            pendingShareAfterLoginRef.current = false;
+          }
+        },
+        {
+          confirmLabel: 'Accedi con Google',
+          cancelLabel: 'Annulla',
+          onCancel: () => {
+            pendingShareAfterLoginRef.current = false;
+          },
+          onDismiss: () => {
+            pendingShareAfterLoginRef.current = false;
+          }
+        }
+      );
+      return;
+    }
     promptPendingBeforeAction(executeShare);
   };
+
+  useEffect(() => {
+    if (user && pendingShareAfterLoginRef.current) {
+      pendingShareAfterLoginRef.current = false;
+      if (currentPage === 'costellazioni') {
+        promptPendingBeforeAction(executeShare);
+      }
+    }
+  }, [user, currentPage]);
 
   const toggleFlowerSelection = (id: number) => {
     setSelectedFlowersIds(prev => 
@@ -2693,55 +2695,6 @@ export default function App() {
     doc.text(footerText, 20, yPos);
     
     doc.save("report-rune.pdf");
-  };
-
-  const buildWhatsAppLegendText = (chars: CharacterType[]): string => {
-    const resolved = resolveCharsWithStair(chars);
-    const nomeStr = (userData.nome || userProfile?.nome || user?.displayName || '').trim() || 'Cliente';
-    const etaStr = (userData.eta || userProfile?.eta || '').toString().trim();
-    const headerLine = `Costellazione di ${nomeStr}${etaStr ? `, ${etaStr}` : ''} — lettura dal punto di vista di Io`;
-
-    const ioChar = resolved.find(c => (c.label || '').trim().toLowerCase() === 'io');
-    const ioStageX = ioChar ? getStairXRatio(getCharacterStairV2(ioChar), getCharacterNormalizedX(ioChar)) : null;
-
-    const baseFigureLines = resolved.map((char) => {
-      const label = (char.label || 'Senza nome').trim() || 'Senza nome';
-      const stairText = char.stair === 'upper' ? 'Gradino superiore' : 'Gradino inferiore';
-      let ioPosText = 'riferimento a Io: non presente';
-      if (ioChar) {
-        if (char.id === ioChar.id) {
-          ioPosText = 'punto di riferimento (Io)';
-        } else if (ioStageX !== null) {
-          const charStageX = getStairXRatio(getCharacterStairV2(char), getCharacterNormalizedX(char));
-          const diffStageX = charStageX - ioStageX;
-          if (Math.abs(diffStageX) < 0.04) {
-            ioPosText = 'in linea con Io';
-          } else if (diffStageX < 0) {
-            ioPosText = 'alla destra di Io';
-          } else {
-            ioPosText = 'alla sinistra di Io';
-          }
-        }
-      }
-      const parts = [label, stairText, ioPosText];
-      if (char.feeling === 'piacevole') parts.push('emozione piacevole');
-      else if (char.feeling === 'spiacevole') parts.push('emozione spiacevole');
-      return parts.join(' · ');
-    });
-
-    const lines = [headerLine, ...baseFigureLines];
-    for (let i = 0; i < resolved.length; i += 1) {
-      const mem = (resolved[i].memory || '').trim();
-      if (!mem) continue;
-      const candidateLine = `${lines[i + 1]} · memoria: ${mem}`;
-      const nextLines = [...lines];
-      nextLines[i + 1] = candidateLine;
-      if (nextLines.join('\n').length <= 900) {
-        lines[i + 1] = candidateLine;
-      }
-    }
-
-    return lines.join('\n');
   };
 
   const renderShape = (
@@ -2918,7 +2871,35 @@ export default function App() {
 
               {(() => {
                 const deduplicatedReadings = getDeduplicatedReadings(adminData.readings);
-                const constellationReadings = deduplicatedReadings.filter(read => read.type === 'constellation');
+                const normalizedSearch = adminSearchQuery.trim().toLowerCase();
+                const isReadingUnread = (read: any) => !adminReadMap[read.id];
+                const matchesAdminSearch = (read: any) => {
+                  if (!normalizedSearch) return true;
+                  const name = (read.userName || '').toString().toLowerCase();
+                  const email = (read.userEmail || '').toString().toLowerCase();
+                  return name.includes(normalizedSearch) || email.includes(normalizedSearch);
+                };
+                const sortInboxReadings = (list: any[]) =>
+                  [...list].sort((a, b) => {
+                    const aUnread = isReadingUnread(a) ? 1 : 0;
+                    const bUnread = isReadingUnread(b) ? 1 : 0;
+                    if (aUnread !== bUnread) return bUnread - aUnread;
+                    return getReadingTimestampMillis(b) - getReadingTimestampMillis(a);
+                  });
+
+                const allConstellations = deduplicatedReadings.filter(read => read.type === 'constellation');
+                const allFlowers = deduplicatedReadings.filter(read => read.type === 'flower');
+                const allRunes = deduplicatedReadings.filter(read => read.type === 'rune');
+
+                const unreadConstellationsCount = allConstellations.filter(isReadingUnread).length;
+                const unreadFlowersCount = allFlowers.filter(isReadingUnread).length;
+                const unreadRunesCount = allRunes.filter(isReadingUnread).length;
+                const totalUnreadCount = unreadConstellationsCount + unreadFlowersCount + unreadRunesCount;
+
+                const constellationReadings = sortInboxReadings(allConstellations.filter(matchesAdminSearch));
+                const flowerReadings = sortInboxReadings(allFlowers.filter(matchesAdminSearch));
+                const runeReadings = sortInboxReadings(allRunes.filter(matchesAdminSearch));
+
                 return (
               <div className="grid grid-cols-1 gap-8">
                 {/* Stats */}
@@ -2933,36 +2914,108 @@ export default function App() {
                     <p className="text-[10px] uppercase tracking-widest opacity-60 font-bold mb-1">Analisi Effettuate</p>
                     <p className="text-3xl font-serif italic text-[#c2b280]">{deduplicatedReadings.length}</p>
                   </div>
-                  <div className="bg-[#f8f5f0] p-6 rounded-3xl border border-[#e5e0d8] text-center col-span-2 flex flex-col justify-center">
-                    <Info className="mx-auto mb-2 text-[#c2b280]" size={20} />
-                    <p className="text-[10px] uppercase tracking-widest opacity-60 font-bold mb-1">Nota</p>
+                  <div className="bg-[#f8f5f0] p-6 rounded-3xl border border-[#e5e0d8] text-center col-span-2 flex flex-col justify-center items-center gap-1">
+                    <Info className="mx-auto mb-1 text-[#c2b280]" size={20} />
+                    <p className="text-[10px] uppercase tracking-widest opacity-60 font-bold">Casella in arrivo</p>
+                    <span className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider ${totalUnreadCount > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-white text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                      Nuove: {totalUnreadCount}
+                    </span>
                     <p className="text-xs italic opacity-50 px-4">Utilizza la dashboard per gestire le prenotazioni e il contatto diretto via WhatsApp.</p>
                   </div>
                 </div>
 
-                {/* Constellations received independently from candidacies */}
-                <div className="space-y-4 mb-10">
-                  <div className="flex items-center justify-between bg-[#fdfbf7] p-4 rounded-2xl border border-[#e5e0d8]">
-                    <h3 className="font-bold uppercase tracking-[0.2em] text-[#c2b280] text-xs flex items-center gap-2">
-                      <Share2 size={14} /> Costellazioni ricevute
-                    </h3>
+                {/* Search bar above received lists */}
+                <div className="bg-[#fdfbf7] p-4 rounded-2xl border border-[#e5e0d8] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#4a3f35]">Casella in arrivo</span>
+                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${totalUnreadCount > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                      Nuove: {totalUnreadCount}
+                    </span>
+                  </div>
+                  <div className="relative w-full sm:w-80">
+                    <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#4a3f35]/40 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={adminSearchQuery}
+                      onChange={(e) => setAdminSearchQuery(e.target.value)}
+                      placeholder="Cerca per nome o email utente..."
+                      className="w-full pl-9 pr-8 py-2 rounded-full bg-white border border-[#e5e0d8] text-xs text-[#4a3f35] focus:outline-none focus:ring-2 focus:ring-[#c2b280]"
+                    />
+                    {adminSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setAdminSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#4a3f35]/40 hover:text-[#4a3f35]"
+                        title="Pulisci ricerca"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Constellations received */}
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-[#fdfbf7] p-4 rounded-2xl border border-[#e5e0d8]">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-bold uppercase tracking-[0.2em] text-[#c2b280] text-xs flex items-center gap-2">
+                        <Share2 size={14} /> Costellazioni ricevute
+                      </h3>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${unreadConstellationsCount > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                        Nuove: {unreadConstellationsCount}
+                      </span>
+                    </div>
                     <span className="text-[10px] opacity-50">{constellationReadings.length} {constellationReadings.length === 1 ? 'totale' : 'totali'}</span>
                   </div>
                   <div className="space-y-3">
-                    {constellationReadings.map(read => (
-                      <div key={`standalone-${read.id}`} className="p-5 bg-white rounded-2xl border border-[#e5e0d8] shadow-sm">
-                        <div className="flex flex-wrap justify-between gap-2 mb-3">
-                          <div>
-                            <p className="font-bold text-[#4a3f35]">{read.userName || 'Utente senza nome'}</p>
-                            <p className="text-[10px] opacity-50">{read.userEmail || 'Email non disponibile'}</p>
+                    {constellationReadings.map(read => {
+                      const unread = isReadingUnread(read);
+                      const isExpanded = Boolean(expandedAdminReadingIds[read.id]);
+                      return (
+                      <div key={`standalone-${read.id}`} className={`p-5 rounded-2xl border shadow-sm transition-colors ${unread ? 'bg-[#fdfbf7] border-[#c2b280]' : 'bg-white border-[#e5e0d8]'}`}>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => toggleAdminReadingExpanded(read.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              toggleAdminReadingExpanded(read.id);
+                            }
+                          }}
+                          className="flex flex-wrap justify-between items-center gap-2 cursor-pointer select-none"
+                        >
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${unread ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                              {unread ? 'Nuova' : 'Letta'}
+                            </span>
+                            <div>
+                              <p className="font-bold text-[#4a3f35]">{read.userName || 'Utente senza nome'}</p>
+                              <p className="text-[10px] opacity-50">{read.userEmail || 'Email non disponibile'}</p>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {!unread && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void markReadingAsUnread(read.id);
+                                }}
+                                className="px-3 py-1 rounded-full border border-[#e5e0d8] bg-white hover:bg-[#f8f5f0] text-[10px] font-bold text-[#4a3f35] transition-colors"
+                              >
+                                Segna come da vedere
+                              </button>
+                            )}
                             <span className="text-[9px] opacity-50">{read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recente'}</span>
-                            <button type="button" onClick={() => deleteReading(read)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full" title="Elimina lettura">
+                            <ChevronDown size={16} className={`text-[#4a3f35]/60 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            <button type="button" onClick={(e) => { e.stopPropagation(); deleteReading(read); }} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full" title="Elimina lettura">
                               <Trash2 size={14} />
                             </button>
                           </div>
                         </div>
+                        {isExpanded && (
+                        <div className="mt-4 pt-4 border-t border-[#e5e0d8]/70">
                         <p className="text-[10px] italic text-[#8a7954] bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl px-3 py-1.5 mb-3">
                           Lettura dal punto di vista di Io: destra e sinistra sono quelle del pupazzo, opposte a quelle dello schermo.
                         </p>
@@ -3032,10 +3085,199 @@ export default function App() {
                             );
                           })}
                         </div>
+                        </div>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                     {constellationReadings.length === 0 && (
                       <p className="text-[10px] opacity-40 italic text-center py-4">Nessuna costellazione ricevuta.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Flowers received */}
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-[#fdfbf7] p-4 rounded-2xl border border-[#e5e0d8]">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-bold uppercase tracking-[0.2em] text-[#c2b280] text-xs flex items-center gap-2">
+                        <Heart size={14} /> Fiori ricevuti
+                      </h3>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${unreadFlowersCount > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                        Nuove: {unreadFlowersCount}
+                      </span>
+                    </div>
+                    <span className="text-[10px] opacity-50">{flowerReadings.length} {flowerReadings.length === 1 ? 'totale' : 'totali'}</span>
+                  </div>
+                  <div className="space-y-3">
+                    {flowerReadings.map(read => {
+                      const unread = isReadingUnread(read);
+                      const isExpanded = Boolean(expandedAdminReadingIds[read.id]);
+                      const flowerList: string[] = Array.isArray(read.flowerNames) && read.flowerNames.length > 0
+                        ? read.flowerNames
+                        : Array.isArray(read.flowerIds)
+                          ? read.flowerIds.map((id: number) => BACH_FLOWERS.find(f => f.id === id)?.name).filter(Boolean)
+                          : [];
+                      return (
+                        <div key={`flower-${read.id}`} className={`p-5 rounded-2xl border shadow-sm transition-colors ${unread ? 'bg-[#fdfbf7] border-[#c2b280]' : 'bg-white border-[#e5e0d8]'}`}>
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => toggleAdminReadingExpanded(read.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleAdminReadingExpanded(read.id);
+                              }
+                            }}
+                            className="flex flex-wrap justify-between items-center gap-2 cursor-pointer select-none"
+                          >
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${unread ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                                {unread ? 'Nuova' : 'Letta'}
+                              </span>
+                              <div>
+                                <p className="font-bold text-[#4a3f35]">{read.userName || 'Utente senza nome'}</p>
+                                <p className="text-[10px] opacity-50">{read.userEmail || 'Email non disponibile'}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {!unread && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void markReadingAsUnread(read.id);
+                                  }}
+                                  className="px-3 py-1 rounded-full border border-[#e5e0d8] bg-white hover:bg-[#f8f5f0] text-[10px] font-bold text-[#4a3f35] transition-colors"
+                                >
+                                  Segna come da vedere
+                                </button>
+                              )}
+                              <span className="text-[9px] opacity-50">{read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recente'}</span>
+                              <ChevronDown size={16} className={`text-[#4a3f35]/60 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              <button type="button" onClick={(e) => { e.stopPropagation(); deleteReading(read); }} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full" title="Elimina lettura">
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                          {isExpanded && (
+                            <div className="mt-4 pt-4 border-t border-[#e5e0d8]/70 space-y-2 text-xs text-[#4a3f35]">
+                              <p className="text-[10px] uppercase tracking-widest font-bold text-[#c2b280]">
+                                Fiori selezionati ({flowerList.length})
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {flowerList.map((name, idx) => (
+                                  <span key={`${read.id}-flower-${idx}`} className="px-3 py-1 rounded-full bg-[#fdfbf7] border border-[#e5e0d8] text-xs font-medium">
+                                    {name}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {flowerReadings.length === 0 && (
+                      <p className="text-[10px] opacity-40 italic text-center py-4">Nessun fiore ricevuto.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Runes received */}
+                <div className="space-y-4 mb-10">
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-[#fdfbf7] p-4 rounded-2xl border border-[#e5e0d8]">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-bold uppercase tracking-[0.2em] text-[#c2b280] text-xs flex items-center gap-2">
+                        <Sparkles size={14} /> Rune ricevute
+                      </h3>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${unreadRunesCount > 0 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                        Nuove: {unreadRunesCount}
+                      </span>
+                    </div>
+                    <span className="text-[10px] opacity-50">{runeReadings.length} {runeReadings.length === 1 ? 'totale' : 'totali'}</span>
+                  </div>
+                  <div className="space-y-3">
+                    {runeReadings.map(read => {
+                      const unread = isReadingUnread(read);
+                      const isExpanded = Boolean(expandedAdminReadingIds[read.id]);
+                      const runeItems = Array.isArray(read.runeIds) && read.runeIds.length > 0
+                        ? read.runeIds.map((id: number, idx: number) => {
+                            const found = RUNES.find(r => r.id === id);
+                            const name = (Array.isArray(read.runeNames) && read.runeNames[idx]) || found?.name || `Runa ${id}`;
+                            return { name, meaning: found?.meaning || '' };
+                          })
+                        : Array.isArray(read.runeNames)
+                          ? read.runeNames.map((name: string) => {
+                              const found = RUNES.find(r => r.name === name);
+                              return { name, meaning: found?.meaning || '' };
+                            })
+                          : [];
+                      return (
+                        <div key={`rune-${read.id}`} className={`p-5 rounded-2xl border shadow-sm transition-colors ${unread ? 'bg-[#fdfbf7] border-[#c2b280]' : 'bg-white border-[#e5e0d8]'}`}>
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => toggleAdminReadingExpanded(read.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleAdminReadingExpanded(read.id);
+                              }
+                            }}
+                            className="flex flex-wrap justify-between items-center gap-2 cursor-pointer select-none"
+                          >
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${unread ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-[#f8f5f0] text-[#4a3f35]/60 border border-[#e5e0d8]'}`}>
+                                {unread ? 'Nuova' : 'Letta'}
+                              </span>
+                              <div>
+                                <p className="font-bold text-[#4a3f35]">{read.userName || 'Utente senza nome'}</p>
+                                <p className="text-[10px] opacity-50">{read.userEmail || 'Email non disponibile'}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {!unread && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void markReadingAsUnread(read.id);
+                                  }}
+                                  className="px-3 py-1 rounded-full border border-[#e5e0d8] bg-white hover:bg-[#f8f5f0] text-[10px] font-bold text-[#4a3f35] transition-colors"
+                                >
+                                  Segna come da vedere
+                                </button>
+                              )}
+                              <span className="text-[9px] opacity-50">{read.timestamp?.toDate ? read.timestamp.toDate().toLocaleDateString('it-IT') : 'Recente'}</span>
+                              <ChevronDown size={16} className={`text-[#4a3f35]/60 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              <button type="button" onClick={(e) => { e.stopPropagation(); deleteReading(read); }} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full" title="Elimina lettura">
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                          {isExpanded && (
+                            <div className="mt-4 pt-4 border-t border-[#e5e0d8]/70 space-y-3 text-xs text-[#4a3f35]">
+                              {read.question && (
+                                <p className="italic bg-[#fdfbf7] border border-[#e5e0d8] rounded-xl px-3 py-2">
+                                  <strong>Domanda:</strong> &ldquo;{read.question}&rdquo;
+                                </p>
+                              )}
+                              <div className="flex flex-wrap gap-2">
+                                {runeItems.map((item, idx) => (
+                                  <div key={`${read.id}-rune-${idx}`} className="px-3 py-1.5 rounded-xl bg-[#fdfbf7] border border-[#e5e0d8]">
+                                    <span className="font-bold text-[#4a3f35]">{item.name}</span>
+                                    {item.meaning && <span className="opacity-65 ml-1.5">· {item.meaning}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {runeReadings.length === 0 && (
+                      <p className="text-[10px] opacity-40 italic text-center py-4">Nessuna lettura rune ricevuta.</p>
                     )}
                   </div>
                 </div>
@@ -5739,14 +5981,14 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Share & WhatsApp Legend Modal */}
+      {/* Sent to Graziamaria Confirmation Modal */}
       <AnimatePresence>
-        {shareLegendModal && (
+        {sentToGraziamariaModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={closeShareLegendModal}
+            onClick={closeSentToGraziamariaModal}
             className="fixed inset-0 z-[290] flex items-center justify-center bg-[#4a3f35]/40 backdrop-blur-md p-4"
           >
             <motion.div
@@ -5754,15 +5996,15 @@ export default function App() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.92, y: 16 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto border border-[#e5e0d8]"
+              className="bg-white p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-2xl max-w-md w-full border border-[#e5e0d8]"
             >
-              <div className="flex justify-between items-start gap-4 mb-3">
+              <div className="flex justify-between items-start gap-4 mb-4">
                 <h3 className="text-xl sm:text-2xl font-serif italic text-[#4a3f35]">
-                  Legenda per Graziamaria
+                  Costellazione inviata
                 </h3>
                 <button
                   type="button"
-                  onClick={closeShareLegendModal}
+                  onClick={closeSentToGraziamariaModal}
                   className="p-2 hover:bg-[#f8f5f0] rounded-full transition-colors text-[#4a3f35]"
                   aria-label="Chiudi"
                 >
@@ -5770,75 +6012,23 @@ export default function App() {
                 </button>
               </div>
 
-              {shareLegendModal.imageStatus === 'preparing' ? (
-                <div className="mb-3 p-4 rounded-2xl border border-[#e5e0d8] bg-[#fdfbf7] text-center text-xs text-[#8a7954] font-medium">
-                  Preparo l&apos;immagine…
-                </div>
-              ) : shareLegendModal.imageStatus === 'ready' && shareLegendModal.previewUrl ? (
-                <div className="mb-3 p-2 rounded-2xl border border-[#e5e0d8] bg-[#f8f5f0] flex justify-center">
-                  <img
-                    src={shareLegendModal.previewUrl}
-                    alt="Anteprima della costellazione"
-                    className="max-h-36 w-auto object-contain rounded-xl"
-                  />
-                </div>
-              ) : (
-                <div className="mb-3 p-3 rounded-2xl border border-amber-200 bg-amber-50 text-amber-800 text-xs leading-relaxed">
-                  Non è stato possibile preparare l&apos;immagine automatica della costellazione. Puoi comunque inviare la legenda scritta su WhatsApp.
-                </div>
-              )}
-
-              <div className="max-h-48 overflow-y-auto p-3 rounded-2xl bg-[#fdfbf7] border border-[#e5e0d8] text-xs text-[#4a3f35] whitespace-pre-line leading-relaxed mb-4">
-                {shareLegendModal.fullText}
-              </div>
+              <p className="text-sm text-[#4a3f35]/85 leading-relaxed mb-6">
+                Inviata a Graziamaria. La trovi anche nella tua area personale.
+              </p>
 
               <div className="flex flex-col gap-2.5">
-                {shareLegendModal.messages.length === 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const waUrl = `https://wa.me/393497921890?text=${encodeURIComponent(shareLegendModal.messages[0])}`;
-                      window.open(waUrl, '_blank');
-                    }}
-                    className="w-full py-3 px-5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#25D366] text-white hover:bg-[#128C7E] shadow-lg transition-all flex items-center justify-center gap-2"
-                  >
-                    <MessageCircle size={16} />
-                    <span>Invia legenda su WhatsApp</span>
-                  </button>
-                ) : (
-                  shareLegendModal.messages.map((msg, idx) => (
-                    <button
-                      key={`wa-chunk-${idx}`}
-                      type="button"
-                      onClick={() => {
-                        const waUrl = `https://wa.me/393497921890?text=${encodeURIComponent(msg)}`;
-                        window.open(waUrl, '_blank');
-                      }}
-                      className="w-full py-3 px-5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#25D366] text-white hover:bg-[#128C7E] shadow-lg transition-all flex items-center justify-center gap-2"
-                    >
-                      <MessageCircle size={16} />
-                      <span>
-                        {idx === 0
-                          ? `Invia legenda su WhatsApp (1/${shareLegendModal.messages.length})`
-                          : `Invia parte ${idx + 1}/${shareLegendModal.messages.length} su WhatsApp`}
-                      </span>
-                    </button>
-                  ))
-                )}
                 <button
                   type="button"
-                  onClick={handleSendShareImage}
-                  disabled={shareLegendModal.imageStatus !== 'ready'}
+                  onClick={handleDownloadSentImage}
+                  disabled={!sentToGraziamariaModal.imageBlob}
                   className="w-full py-3 px-5 rounded-full text-xs font-bold uppercase tracking-wider bg-[#c2b280] text-white hover:bg-[#b1a170] disabled:opacity-45 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
                 >
-                  <Share2 size={16} />
-                  <span>
-                    {shareLegendModal.imageStatus === 'preparing' ? "Preparo l'immagine…" : 'Invia immagine'}
-                  </span>
+                  <Download size={16} />
+                  <span>Scarica immagine</span>
                 </button>
                 <button
                   type="button"
-                  onClick={closeShareLegendModal}
+                  onClick={closeSentToGraziamariaModal}
                   className="w-full py-2.5 px-5 rounded-full text-xs font-bold uppercase tracking-wider border border-[#e5e0d8] text-[#4a3f35] hover:bg-[#f8f5f0] transition-all"
                 >
                   Chiudi

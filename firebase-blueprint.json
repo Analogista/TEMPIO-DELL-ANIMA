@@ -221,6 +221,24 @@
         "status",
         "createdAt"
       ]
+    },
+    "AdminReadState": {
+      "title": "AdminReadState",
+      "description": "Admin read/unread tracking state for received readings.",
+      "type": "object",
+      "properties": {
+        "readBy": {
+          "type": "string"
+        },
+        "readAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "readBy",
+        "readAt"
+      ]
     }
   },
   "firestore": {
@@ -251,6 +269,10 @@
     "/users/{userId}/candidacies/{candidacyId}": {
       "schema": "Candidacy",
       "description": "User's submitted candidature copy."
+    },
+    "/adminReadState/{readingId}": {
+      "schema": "AdminReadState",
+      "description": "Admin inbox read state keyed by allReadings document ID."
     }
   }
 }

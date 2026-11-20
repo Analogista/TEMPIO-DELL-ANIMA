@@ -126,5 +126,16 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
     match /admins/{adminId} { allow read: if isAdmin(); }
+    match /adminReadState/{readingId} {
+      allow get: if isAdmin() && isValidId(readingId);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(readingId)
+        && request.resource.data.keys().hasAll(['readBy', 'readAt'])
+        && request.resource.data.keys().hasOnly(['readBy', 'readAt'])
+        && request.resource.data.readBy is string
+        && request.resource.data.readBy == request.auth.token.email
+        && request.resource.data.readAt == request.time;
+      allow delete: if isAdmin() && isValidId(readingId);
+    }
   }
 }
