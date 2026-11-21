@@ -2804,7 +2804,7 @@ export default function App() {
     }
 
     if (!candidacyForm.nome || !candidacyForm.email || !candidacyForm.telefono || !candidacyForm.puntoRottura) {
-      showAlert('Campi obbligatori', 'Nome, Email, Telefono e Descrizione del fastidio sono obbligatori.');
+      showAlert('Campi obbligatori', 'Nome, Email, Telefono e Descrizione del tema sono obbligatori.');
       return;
     }
 
@@ -5087,7 +5087,7 @@ export default function App() {
                 Risolutrice dell'Invisibile
               </h1>
               <h2 className="font-serif italic text-xl sm:text-2xl text-[#5a5a40] mb-2">
-                Trattamento Olistico di Precisione
+                Esperienza Simbolica di Riflessione Personale
               </h2>
               <p className="uppercase tracking-[0.4em] text-[#c2b280] font-black text-[10px] mb-8">
                 di Graziamaria Infantino
@@ -5106,12 +5106,12 @@ export default function App() {
               <div className="absolute top-0 right-0 w-64 h-64 bg-[#c2b280] opacity-10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
               <div className="relative z-10 flex flex-col items-center text-center">
                 <h3 className="font-serif italic text-2xl sm:text-3xl mb-6 leading-tight">
-                  Hai un blocco che non riesci a spiegare? La risposta è scritta dove non guardi mai.
+                  Hai un tema che desideri esplorare? Inizia da uno spunto di riflessione personale.
                 </h3>
                 <p className="text-sm sm:text-base opacity-90 mb-8 max-w-2xl leading-relaxed text-center">
-                  Graziamaria, la Risolutrice dell'Invisibile, analizza la tua storia attraverso i tuoi Portali Visivi. 
+                  Graziamaria propone un’esplorazione simbolica dei tuoi Portali Visivi, come spunto per riflettere sulla tua storia. 
                   <span className="block mt-4 font-bold text-[#c2b280]">Solo 5 posti disponibili per questa settimana per ricevere la tua mappatura personalizzata.</span>
-                  Scopri cosa dice il tuo corpo. Inizia il percorso caricando le foto dei tuoi piedi. WhatsApp è disponibile per informazioni pratiche, candidature e appuntamenti.
+                  Esplora in chiave simbolica uno spunto di riflessione personale. Inizia il percorso caricando le foto dei tuoi piedi. WhatsApp è disponibile per informazioni pratiche, candidature e appuntamenti.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4 mt-8 w-full justify-center">
                   <button 
@@ -5182,7 +5182,7 @@ export default function App() {
                 </div>
                 <div className="z-10">
                   <h3 className="font-serif italic text-2xl mb-2">Costellazioni</h3>
-                  <p className="text-xs opacity-60 uppercase tracking-widest font-bold">Simulazione Interattiva per Diagnosi Olistica</p>
+                  <p className="text-xs opacity-60 uppercase tracking-widest font-bold">Esperienza guidata di riflessione personale</p>
                   <p className="text-[11px] text-[#5a5a40] font-semibold mt-2">Posizionamento su &quot;Gradini&quot; o &quot;Palazzo&quot;</p>
                 </div>
               </motion.button>
@@ -5201,7 +5201,7 @@ export default function App() {
                 </div>
                 <div className="z-10">
                   <h3 className="font-serif italic text-2xl mb-2">Fiori di Bach</h3>
-                  <p className="text-xs opacity-60 uppercase tracking-widest font-bold">Simulazione Interattiva per Diagnosi Olistica</p>
+                  <p className="text-xs opacity-60 uppercase tracking-widest font-bold">Esperienza guidata di riflessione personale</p>
                 </div>
               </motion.button>
 
@@ -5274,14 +5274,14 @@ export default function App() {
                     <div className="space-y-4">
                       <h3 className="font-bold uppercase tracking-widest text-[#5a5a40] text-xs flex items-center gap-3">
                         <span className="w-8 h-8 rounded-full bg-[#5a5a40] text-white flex items-center justify-center text-xs font-black shrink-0">1</span>
-                        Diagnostica Intuitiva e "Anamnesi Alchemica"
+                        Osservazione Simbolica e "Lettura Alchemica"
                       </h3>
                       <div className="text-sm opacity-80 pl-11 space-y-2">
-                        <p>Il cuore del suo metodo è la capacità di effettuare analisi di precisione millimetrica attraverso l'osservazione della pianta del piede, un processo che può svolgere anche a distanza tramite fotografie. Questa tecnica le permette di:</p>
+                        <p>Uno degli aspetti centrali del suo approccio è l'osservazione simbolica della pianta del piede, proposta anche a distanza tramite fotografie inviate dall'utente. Questa pratica di riflessione personale invita a:</p>
                         <ul className="list-disc pl-4 space-y-1">
-                          <li>Individuare traumi passati, blocchi emotivi e patologie fisiche senza che il cliente debba parlare.</li>
-                          <li>Mappare lo stato degli organi vitali (come cuore, polmoni, fegato e stomaco) e del sistema nervoso proiettati sui piedi.</li>
-                          <li>Fornire risposte profonde ("la verità su se stessi") che spesso i clienti non trovano nella medicina tradizionale.</li>
+                          <li>Esplorare in chiave simbolica vissuti emotivi e momenti significativi del proprio percorso interiore.</li>
+                          <li>Osservare i segni e le aree del piede come spunti metaforici di ascolto di sé e consapevolezza personale.</li>
+                          <li>Offrire uno spazio di introspezione personale da affiancare al proprio percorso di crescita interiore, senza finalità diagnostiche o sanitarie.</li>
                         </ul>
                       </div>
                     </div>
@@ -5290,15 +5290,15 @@ export default function App() {
                     <div className="space-y-4">
                       <h3 className="font-bold uppercase tracking-widest text-[#5a5a40] text-xs flex items-center gap-3">
                         <span className="w-8 h-8 rounded-full bg-[#5a5a40] text-white flex items-center justify-center text-xs font-black shrink-0">2</span>
-                        Tecniche di Guarigione Energetica e Vibrazionale
+                        Pratiche Simboliche di Consapevolezza Interiore
                       </h3>
                       <div className="text-sm opacity-80 pl-11 space-y-2">
-                        <p>Graziamaria integra numerose discipline per riportare equilibrio e leggerezza:</p>
+                        <p>Graziamaria propone diverse discipline tradizionali e simboliche come spunti di ascolto e riflessione personale:</p>
                         <ul className="list-disc pl-4 space-y-1">
-                          <li><strong>Cristalloterapia:</strong> È specializzata in cristallopratica (con una formazione di 250 ore) e utilizza le pietre per sblocchi energetici e riequilibri a distanza.</li>
-                          <li><strong>Reiki e Lavaggio Energetico:</strong> Agisce come un canale per trasferire energia e liberare i nodi energetici del corpo.</li>
-                          <li><strong>Radioestesia e Lettura dell'Aura:</strong> Strumenti utilizzati per completare la diagnosi energetica.</li>
-                          <li><strong>Rimedi Personalizzati:</strong> Prepara "acque informate" con sinergie di Fiori di Bach per sostenere il processo di autoguarigione.</li>
+                          <li><strong>Cristallopratica:</strong> Utilizza l'approccio simbolico delle pietre e dei cristalli (con una formazione di 250 ore) come momento di centratura e contemplazione personale.</li>
+                          <li><strong>Reiki e Pratiche Energetiche Tradizionali:</strong> Propone momenti di quiete e ascolto interiore secondo la tradizione simbolica di queste discipline.</li>
+                          <li><strong>Radioestesia e Lettura Simbolica:</strong> Strumenti simbolici utilizzati come supporto alla riflessione personale, senza finalità diagnostiche.</li>
+                          <li><strong>Fiori di Bach:</strong> Esplorazione simbolica delle sinergie dei Fiori di Bach come spunto di consapevolezza emotiva e riflessione interiore.</li>
                         </ul>
                       </div>
                     </div>
@@ -5307,14 +5307,14 @@ export default function App() {
                     <div className="space-y-4">
                       <h3 className="font-bold uppercase tracking-widest text-[#5a5a40] text-xs flex items-center gap-3">
                         <span className="w-8 h-8 rounded-full bg-[#5a5a40] text-white flex items-center justify-center text-xs font-black shrink-0">3</span>
-                        Lavoro Sistemico e Trattamenti Manuali (in studio)
+                        Approccio Sistemico e Pratiche in Studio
                       </h3>
                       <div className="text-sm opacity-80 pl-11 space-y-2">
-                        <p>Oltre alla parte energetica, si occupa di aspetti strutturali e relazionali:</p>
+                        <p>Oltre agli strumenti simbolici, propone in studio percorsi dedicati all'ascolto relazionale e al benessere personale:</p>
                         <ul className="list-disc pl-4 space-y-1">
-                          <li><strong>Costellazioni Familiari:</strong> Utilizza il metodo sistemico per risolvere dinamiche familiari profonde.</li>
-                          <li><strong>Trattamenti Olistici Manuali:</strong> La sua offerta include massaggi Ayurvedici, linfodrenaggio Vodder, Shirodhara, Hot Stone e massaggi decontratturanti.</li>
-                          <li><strong>Estetica Curativa:</strong> Applica il suo approccio olistico anche a pedicure curativi e massaggi al viso con l'ausilio di cristalli.</li>
+                          <li><strong>Costellazioni Familiari:</strong> Propone l'approccio sistemico come strumento simbolico per osservare e riflettere sulle dinamiche familiari e relazionali.</li>
+                          <li><strong>Pratiche Olistiche di Rilassamento:</strong> In studio propone esperienze di benessere non sanitarie, tra cui massaggi Ayurvedici, linfodrenaggio Vodder, Shirodhara, Hot Stone e massaggi decontratturanti.</li>
+                          <li><strong>Benessere Estetico:</strong> Applica il proprio approccio rilassante anche alla cura estetica dei piedi e ai massaggi estetici al viso con l'ausilio di cristalli.</li>
                         </ul>
                       </div>
                     </div>
@@ -5323,13 +5323,13 @@ export default function App() {
                     <div className="space-y-4">
                       <h3 className="font-bold uppercase tracking-widest text-[#5a5a40] text-xs flex items-center gap-3">
                         <span className="w-8 h-8 rounded-full bg-[#5a5a40] text-white flex items-center justify-center text-xs font-black shrink-0">4</span>
-                        Strategia Online e Percorsi di Sblocco
+                        Percorsi Online di Riflessione Personale
                       </h3>
                       <div className="text-sm opacity-80 pl-11 space-y-2">
-                        <p>Graziamaria ha strutturato la sua attività online per risolvere casi definiti "impossibili" attraverso una "Scala del Valore":</p>
+                        <p>Graziamaria ha strutturato la sua attività online attraverso diversi momenti di accompagnamento alla riflessione personale:</p>
                         <ul className="list-disc pl-4 space-y-1">
-                          <li><strong>Fase d'ingresso:</strong> L'analisi del piede tramite foto che ti genererà un "effetto Wow" immediato.</li>
-                          <li><strong>Sessioni di Sblocco:</strong> Incontri intensivi in videochiamata per agire sulla radice del malessere.</li>
+                          <li><strong>Fase d'ingresso:</strong> L'osservazione simbolica della foto del piede come primo spunto di riflessione personalizzata.</li>
+                          <li><strong>Sessioni Individuali di Riflessione:</strong> Incontri in videochiamata dedicati all'ascolto personale e all'approfondimento dei temi emersi.</li>
                           <li><strong>Inner Light Circle:</strong> Un abbonamento esclusivo per un gruppo ristretto di persone che desiderano un supporto energetico continuo, check-up mensili e consigli personalizzati via WhatsApp.</li>
                         </ul>
                       </div>
@@ -5340,10 +5340,10 @@ export default function App() {
 
               <div className="mt-12 pt-8 border-t border-[#e5e0d8] space-y-6 text-center">
                 <p className="text-[#4a3f35] leading-relaxed font-medium italic">
-                  In sintesi, l'obiettivo di Graziamaria è trasformare il malessere in libertà e serenità, vendendo non singole ore di lavoro, ma una reale trasformazione profonda e la risoluzione di blocchi cronici.
+                  In sintesi, Graziamaria propone strumenti simbolici e momenti di ascolto guidato pensati per favorire la riflessione interiore, la consapevolezza personale e una maggiore chiarezza verso se stessi.
                 </p>
                 <p className="font-serif text-2xl text-[#c2b280] italic">
-                  Mettila alla prova subito!
+                  Inizia il tuo percorso di riflessione!
                 </p>
               </div>
             </div>
@@ -5371,7 +5371,7 @@ export default function App() {
                 </button>
                 <div className="text-center flex-1">
                   <h1 className="font-serif italic tracking-tight" style={{ color: '#090909', fontSize: '28px', lineHeight: '26px', fontWeight: 'bold' }}>Costellazioni</h1>
-                  <p className="uppercase tracking-[0.2em]" style={{ color: '#5a5a40', fontSize: '10px', fontWeight: 'bold' }}>Simulazione Interattiva per Diagnosi Olistica</p>
+                  <p className="uppercase tracking-[0.2em]" style={{ color: '#5a5a40', fontSize: '10px', fontWeight: 'bold' }}>Esperienza guidata di riflessione personale</p>
                   <img 
                     src={constellationLayoutType === 'building' ? BUILDING_HEADER_IMAGE_URL : '/fiori/00_Personaggi.webp'} 
                     alt={constellationLayoutType === 'building' ? 'Palazzo Costellazione' : 'Personaggi'} 
@@ -6551,7 +6551,7 @@ export default function App() {
               <div className="inline-flex items-center justify-center w-16 h-16 bg-[#c2b280] rounded-full text-white mb-4 shadow-lg border border-[#b1a170]">
                 <Sparkles size={32} />
               </div>
-              <h2 className="font-serif italic text-4xl mb-2 text-[#4a3f35]">Guida ai Percorsi di Guarigione Alchemica</h2>
+              <h2 className="font-serif italic text-4xl mb-2 text-[#4a3f35]">Guida ai Percorsi di Riflessione Alchemica</h2>
               <p className="text-[#c2b280] uppercase tracking-[0.3em] text-[10px] font-black">Dall’Invisibile alla Libertà: Il Metodo Graziamaria</p>
             </header>
 
@@ -6559,7 +6559,7 @@ export default function App() {
               {/* Intro */}
               <section className="bg-white p-8 sm:p-12 rounded-[3rem] shadow-sm border border-[#e5e0d8] text-center">
                 <p className="text-[#4a3f35] leading-relaxed opacity-90 text-lg italic">
-                  Benvenuto in un percorso di trasformazione profonda. Se sei qui, è perché senti che il tuo malessere ha radici che la medicina tradizionale o i trattamenti classici non sono riusciti a scogliere. Graziamaria, la <span className="text-[#c2b280] font-bold">Risolutrice dell’Invisibile</span>, utilizza il corpo come portale per accedere alla tua verità interiore.
+                  Benvenuto in un percorso di ascolto e riflessione personale. Graziamaria, la <span className="text-[#c2b280] font-bold">Risolutrice dell’Invisibile</span>, propone strumenti simbolici per accompagnarti nell'esplorazione delle tue emozioni e del tuo mondo interiore.
                 </p>
               </section>
 
@@ -6570,18 +6570,18 @@ export default function App() {
                 </div>
                 <h3 className="font-serif italic text-2xl text-[#4a3f35] mb-6 flex items-center gap-4">
                   <span className="w-10 h-10 rounded-full bg-[#c2b280] text-white flex items-center justify-center text-sm font-black shrink-0">1</span>
-                  IL PRIMO PASSO: L'ANAMNESI ALCHEMICA (Gratuita)
+                  IL PRIMO PASSO: LA LETTURA SIMBOLICA ALCHEMICA (Gratuita)
                 </h3>
                 <div className="space-y-6 text-[#4a3f35]">
-                  <p className="opacity-90">Il viaggio inizia sempre dai tuoi piedi. Non sono solo estremità, ma una mappa millimetrica della tua anima e della tua storia.</p>
+                  <p className="opacity-90">Il viaggio inizia dall'osservazione simbolica dei tuoi piedi, intesi come spunto metaforico per riflettere sulla tua storia personale.</p>
                   <ul className="space-y-4">
                     <li className="flex gap-3">
                       <span className="font-bold text-[#c2b280] shrink-0">• Come funziona:</span>
-                      <span className="opacity-80">Carica tramite il modulo qui sotto le foto delle piante dei tuoi piedi (pianta sinistra e pianta destra) per iniziare la tua Anamnesi Gratuita. Verranno salvate nella tua area personale e potrai inviarle anche su WhatsApp per un contatto diretto.</span>
+                      <span className="opacity-80">Carica tramite il modulo qui sotto le foto delle piante dei tuoi piedi (pianta sinistra e pianta destra) per iniziare la tua Lettura Simbolica Gratuita. Verranno salvate nella tua area personale e potrai inviarle anche su WhatsApp per un contatto diretto.</span>
                     </li>
                     <li className="flex gap-3">
                       <span className="font-bold text-[#c2b280] shrink-0">• Cosa riceverai:</span>
-                      <span className="opacity-80">Graziamaria analizzerà i segni, le tensioni e le proiezioni dei tuoi organi vitali. Riceverai un resoconto scritto personalizzato che individuerà i tuoi blocchi emotivi e fisici attuali.</span>
+                      <span className="opacity-80">Graziamaria osserverà in chiave simbolica i segni delle foto inviate. Riceverai un resoconto scritto personalizzato con spunti di riflessione interiore (non costituisce una valutazione o diagnosi sanitaria).</span>
                     </li>
                     <li className="flex gap-3">
                       <span className="font-bold text-[#c2b280] shrink-0">• Costo:</span>
@@ -6604,20 +6604,20 @@ export default function App() {
 
               {/* Step 2 */}
               <section className="space-y-8">
-                <h3 className="font-serif italic text-3xl text-[#4a3f35] text-center">2. I PERCORSI DI TRASFORMAZIONE</h3>
-                <p className="text-center text-sm opacity-70 max-w-2xl mx-auto">Una volta individuata la radice del blocco, puoi scegliere come procedere per ripristinare il tuo equilibrio energetico e fisico.</p>
+                <h3 className="font-serif italic text-3xl text-[#4a3f35] text-center">2. I PERCORSI DI RIFLESSIONE</h3>
+                <p className="text-center text-sm opacity-70 max-w-2xl mx-auto">Dopo il primo confronto simbolico, puoi scegliere come proseguire il tuo percorso di ascolto e riflessione personale.</p>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   {/* Option A */}
                   <div className="bg-white p-8 rounded-[2.5rem] border border-[#e5e0d8] shadow-sm flex flex-col">
-                    <h4 className="font-serif italic text-xl text-[#4a3f35] mb-2">A. SESSIONE DI SBLOCCO INDIVIDUALE</h4>
+                    <h4 className="font-serif italic text-xl text-[#4a3f35] mb-2">A. SESSIONE INDIVIDUALE DI RIFLESSIONE</h4>
                     <p className="text-[10px] uppercase tracking-widest font-bold text-[#c2b280] mb-6">Premium</p>
                     <div className="space-y-4 text-sm opacity-90 flex-1">
-                      <p>Una sessione intensiva per agire direttamente sulla causa primaria emersa dall'anamnesi.</p>
+                      <p>Una sessione dedicata ad approfondire in chiave simbolica i temi emersi dal primo confronto.</p>
                       <ul className="space-y-2">
                         <li><span className="font-bold">Durata:</span> 50 minuti (Zoom o WhatsApp)</li>
                         <li><span className="font-bold">Cosa include:</span> Trattamento energetico (Reiki/Cristalli), lavaggio emozionale e indicazioni pratiche.</li>
-                        <li><span className="font-bold">Ideale per:</span> Problemi specifici e cronici.</li>
+                        <li><span className="font-bold">Ideale per:</span> Chi desidera un momento individuale di ascolto e riflessione approfondita.</li>
                       </ul>
                     </div>
                     <div className="mt-8 pt-6 border-t border-[#f0f0f0] text-center">
@@ -6671,7 +6671,7 @@ export default function App() {
                   </div>
                 </div>
                 <blockquote className="text-center border-t border-b border-[#f0f0f0] py-8 px-4">
-                  <p className="font-serif italic text-xl text-[#4a3f35]">"Non vendo trattamenti, vendo la fine di un conflitto invisibile."</p>
+                  <p className="font-serif italic text-xl text-[#4a3f35]">"Uno spazio simbolico di ascolto e riflessione per osservare con maggiore chiarezza il proprio mondo interiore."</p>
                 </blockquote>
               </section>
 
@@ -6681,7 +6681,7 @@ export default function App() {
                 <div className="max-w-md mx-auto space-y-6 text-left mb-10">
                   <div className="flex gap-4 items-start">
                     <span className="w-6 h-6 rounded-full bg-white text-[#c2b280] flex items-center justify-center text-xs font-black shrink-0 mt-1">1</span>
-                    <p className="text-sm font-medium">Prenota la tua Anamnesi Gratuita inviando le foto su WhatsApp.</p>
+                    <p className="text-sm font-medium">Richiedi la tua Lettura Simbolica Gratuita inviando le foto su WhatsApp.</p>
                   </div>
                   <div className="flex gap-4 items-start">
                     <span className="w-6 h-6 rounded-full bg-white text-[#c2b280] flex items-center justify-center text-xs font-black shrink-0 mt-1">2</span>
@@ -7361,7 +7361,7 @@ export default function App() {
                   </div>
                   <h4 className="font-serif italic text-xl text-[#4a3f35]">Fiori di Bach</h4>
                   <p className="text-sm text-[#4a3f35] opacity-80 leading-relaxed">
-                    Studia il potere vibrazionale dei fiori. Impara a riconoscere le emozioni e a selezionare i rimedi naturali più adatti per riportare l'equilibrio interiore.
+                    Esplora il linguaggio simbolico dei Fiori di Bach come spunto per riconoscere e riflettere sulle proprie emozioni e stati d'animo.
                   </p>
                 </div>
 
@@ -7381,7 +7381,7 @@ export default function App() {
                   </div>
                   <h4 className="font-serif italic text-xl">Il Metodo Integrato</h4>
                   <p className="text-sm opacity-80 leading-relaxed">
-                    Scopri come Graziamaria unisce queste potenti discipline in un unico metodo diagnostico e curativo di precisione millimetrica.
+                    Scopri come Graziamaria integra queste discipline tradizionali in un percorso simbolico di ascolto e riflessione personale.
                   </p>
                 </div>
               </div>
@@ -7389,7 +7389,7 @@ export default function App() {
               {/* Call to Action */}
               <div className="text-center pt-8">
                 <p className="font-serif italic text-lg text-[#4a3f35] mb-6">
-                  "La conoscenza è il primo passo verso la guarigione."
+                  "La conoscenza di sé è il primo passo verso la consapevolezza."
                 </p>
                 <button 
                   onClick={() => setCurrentPage('home')}
@@ -7421,7 +7421,7 @@ export default function App() {
                 <Heart size={24} className="sm:size-8" fill="currentColor" />
               </div>
               <h2 className="font-serif italic text-3xl sm:text-4xl mb-1 sm:mb-2 text-[#4a3f35]">Fiori di Bach</h2>
-              <p className="text-[#c2b280] uppercase tracking-[0.2em] sm:tracking-[0.3em] text-[8px] sm:text-[10px] font-black mb-6">Simulazione Interattiva per Diagnosi Olistica</p>
+              <p className="text-[#c2b280] uppercase tracking-[0.2em] sm:tracking-[0.3em] text-[8px] sm:text-[10px] font-black mb-6">Esperienza guidata di riflessione personale</p>
               
               {/* User Data Section */}
               <div className="flex flex-wrap gap-3 justify-center w-full max-w-2xl mx-auto mb-8">
@@ -7459,7 +7459,7 @@ export default function App() {
               
               <div className="max-w-2xl mx-auto bg-white/40 backdrop-blur-sm p-4 sm:p-6 rounded-2xl border border-[#e5e0d8] shadow-sm mb-8">
                 <p className="text-[#4a3f35] text-xs sm:text-sm italic leading-relaxed">
-                  "Visualizza e scegli i tuoi fiori. La tua scelta verrà salvata nel report che potrai inviare a Graziamaria per la spiegazione che ti sbalordirà"
+                  "Visualizza e scegli i tuoi fiori. La tua scelta verrà salvata nel report che potrai inviare a Graziamaria per una lettura simbolica dedicata"
                 </p>
               </div>
             </header>
@@ -8026,7 +8026,7 @@ export default function App() {
                     <div className="space-y-8">
                       {/* Step info */}
                       <div className="bg-[#fdfbf7] p-6 rounded-3xl border border-[#e5e0d8] text-sm italic opacity-80 leading-relaxed">
-                        "Benvenuto. Rispondi con onestà. Queste domande servono a Graziamaria per preparare lo spazio energetico necessario al tuo sblocco."
+                        "Benvenuto. Rispondi con onestà. Queste domande servono a Graziamaria per contestualizzare il tuo percorso di riflessione personale."
                       </div>
 
                       {/* Question 1 */}
@@ -8035,7 +8035,7 @@ export default function App() {
                           <span className="w-6 h-6 rounded-full bg-[#c2b280] text-white flex items-center justify-center text-[10px]">1</span>
                           Il Punto di Rottura
                         </label>
-                        <p className="text-[10px] opacity-50 italic">Descrivi il fastidio fisico o emotivo che oggi ti impedisce di sentirti leggera/o.</p>
+                        <p className="text-[10px] opacity-50 italic">Descrivi il tema personale o lo stato d'animo su cui senti di voler riflettere oggi.</p>
                         <textarea 
                           value={candidacyForm.puntoRottura}
                           onChange={(e) => setCandidacyForm({...candidacyForm, puntoRottura: e.target.value})}
@@ -8055,7 +8055,7 @@ export default function App() {
                           {[
                             { id: 'meno_mese', label: 'Meno di un mese' },
                             { id: 'qualche_mese', label: 'Qualche mese' },
-                            { id: 'cronico', label: 'Problema cronico' }
+                            { id: 'cronico', label: 'Situazione presente da lungo tempo' }
                           ].map(opt => (
                             <button
                               key={opt.id}
@@ -8078,7 +8078,7 @@ export default function App() {
                           <span className="w-6 h-6 rounded-full bg-[#c2b280] text-white flex items-center justify-center text-[10px]">3</span>
                           Il Termometro dell'Urgenza
                         </label>
-                        <p className="text-[10px] opacity-50 italic">In una scala da 1 a 10, quanto è vitale per te risolvere questo problema proprio ora?</p>
+                        <p className="text-[10px] opacity-50 italic">In una scala da 1 a 10, quanto senti importante dedicare attenzione a questo tema proprio ora?</p>
                         <div className="space-y-2">
                           <input 
                             type="range"
@@ -8107,7 +8107,7 @@ export default function App() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {[
                             { id: 'sollievo', label: 'Sollievo momentaneo' },
-                            { id: 'percorso', label: 'Percorso di sblocco totale' }
+                            { id: 'percorso', label: 'Percorso approfondito di riflessione' }
                           ].map(opt => (
                             <button
                               key={opt.id}
@@ -8190,13 +8190,13 @@ export default function App() {
                         </div>
                       </div>
                       <div className="space-y-4">
-                        <label className="text-xs font-black uppercase tracking-[0.2em] text-[#4a3f35]">Patti di Guarigione</label>
+                        <label className="text-xs font-black uppercase tracking-[0.2em] text-[#4a3f35]">Patti del Percorso</label>
                         <div className="space-y-3">
                           {[
                             { 
                               id: 'pattoFiducia', 
                               q: '5', 
-                              text: 'Sei disposta/o ad affidarti totalmente al metodo della "Risolutrice dell\'Invisibile", accettando che la guarigione richieda la tua partecipazione attiva?' 
+                              text: 'Sei disposta/o ad avvicinarti al percorso simbolico della "Risolutrice dell\'Invisibile", vivendolo come esperienza di ascolto con la tua partecipazione attiva?' 
                             },
                             { 
                               id: 'rispettoSpazioSacro', 
@@ -8282,7 +8282,7 @@ export default function App() {
                             </label>
                           )}
                         </div>
-                        <p className="text-[10px] opacity-40 italic">Le foto della pianta (sinistra e destra) sono obbligatorie. Devono essere nitide per permettere una mappatura millimetrica.</p>
+                        <p className="text-[10px] opacity-40 italic">Le foto della pianta (sinistra e destra) sono obbligatorie. Devono essere nitide per consentire un'osservazione simbolica accurata.</p>
                       </div>
 
                       <button 
