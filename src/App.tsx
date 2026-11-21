@@ -5111,7 +5111,7 @@ export default function App() {
                 <p className="text-sm sm:text-base opacity-90 mb-8 max-w-2xl leading-relaxed text-center">
                   Graziamaria, la Risolutrice dell'Invisibile, analizza la tua storia attraverso i tuoi Portali Visivi. 
                   <span className="block mt-4 font-bold text-[#c2b280]">Solo 5 posti disponibili per questa settimana per ricevere la tua mappatura personalizzata.</span>
-                  Scopri cosa dice il tuo corpo. Inizia il percorso caricando le foto dei tuoi piedi, Graziamaria ti risponderà su WhatsApp.
+                  Scopri cosa dice il tuo corpo. Inizia il percorso caricando le foto dei tuoi piedi. WhatsApp è disponibile per informazioni pratiche, candidature e appuntamenti.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4 mt-8 w-full justify-center">
                   <button 
@@ -5145,7 +5145,7 @@ export default function App() {
                   <Sparkles size={32} />
                 </div>
                 <div className="z-10">
-                  <h3 className="font-serif italic text-2xl mb-2">Percorsi di Guarigione</h3>
+                  <h3 className="font-serif italic text-2xl mb-2">Percorsi di riflessione e scoperta personale</h3>
                   <p className="text-xs opacity-80 uppercase tracking-widest font-bold">Dall'Invisibile alla Libertà</p>
                 </div>
               </motion.button>
@@ -5263,16 +5263,10 @@ export default function App() {
                 
                 <div className="flex-1 space-y-8 text-[#4a3f35] leading-relaxed">
                   <p className="font-medium italic text-lg text-center md:text-left">
-                    Graziamaria si definisce la <span className="text-[#c2b280]">"Risolutrice dell'Invisibile"</span> ed è una specialista in guarigione olistica "High-Ticket". 
+                    Esplora, con la guida di Graziamaria, strumenti simbolici e percorsi di riflessione personale, tra cui Fiori di Bach, Rune e Costellazioni.
                   </p>
                   <p className="text-sm opacity-90">
-                    La sua attività non si limita alla semplice esecuzione di trattamenti, ma si configura come un percorso di guida intuitiva che utilizza il corpo fisico, e in particolare i piedi, come un portale per accedere all'anima del cliente e sciogliere traumi profondi.
-                  </p>
-                  <p className="text-sm opacity-90">
-                    Partendo dalla lettura dei piedi, con l'ausilio delle: Costellazioni, Fiori di Back, Rune, Cristalloterapia e Reiki a distanza, ti assicuro che già dal primo incontro on-line capirai cosa posso donarti perché ti sentirai subito molto meglio. Poi, deciderai se proseguire. <span className="font-bold text-[#c2b280]">IMPORTANTE:</span> seguo solo pochissime persone e selezionate, candidati e ti farò sapere subito.
-                  </p>
-                  <p className="text-sm opacity-90">
-                    Partendo dalla lettura dei piedi, con l'ausilio delle: Costellazioni, Fiori di Back, Rune, Cristalloterapia e Reiki a distanza, ti assicuro che già dal primo incontro on-line capirai cosa posso donarti perché ti sentirai subito molto meglio. Poi, deciderai se proseguire. <span className="font-bold text-[#c2b280]">IMPORTANTE:</span> seguo solo pochissime persone e selezionate, candidati e ti farò sapere subito.
+                    L’esperienza non costituisce una diagnosi, una terapia o un trattamento sanitario e non sostituisce il parere di professionisti qualificati.
                   </p>
   
                   <div className="grid grid-cols-1 gap-12 pt-8 border-t border-[#e5e0d8]">
