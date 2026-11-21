@@ -1556,7 +1556,7 @@ export default function App() {
   const [isLoadingUserAkashic, setIsLoadingUserAkashic] = useState(false);
   const [isRequestingAkashicDeletionId, setIsRequestingAkashicDeletionId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const isAdmin = user?.email === 'analogistabrindisi@gmail.com' || user?.email === 'infantinograziamaria@gmail.com';
+  const isAdmin = user?.emailVerified === true && (user.email === 'analogistabrindisi@gmail.com' || user.email === 'infantinograziamaria@gmail.com');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showCandidacyModal, setShowCandidacyModal] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<'standard' | 'complex' | null>(null);

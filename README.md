@@ -6,6 +6,10 @@ Applicazione React/Vite di Graziamaria per costellazioni familiari, fiori di Bac
 
 Questa versione usa il nuovo progetto Firebase `app-utili-508807` e il database `ai-studio-remixrisolutrice-4e2bf75f-faba-438e-9632-9bbfc8819085`.
 
+URL pubblico attuale dell'app: `https://tempio.ai.studio` (il dominio `tempiodellanima.ai.studio` resta autorizzato per il servizio esistente).
+
+> **Attenzione: risorse condivise e regole da riconciliare.** Il bucket Storage `app-utili-508807.firebasestorage.app` è condiviso con altre app. Le regole Storage presenti in questo repository non corrispondono a quelle attualmente pubblicate: in particolare, qui manca il percorso `/photos`, usato da un'altra app, mentre qui è definito `/constellations`. Non distribuire le regole di questo repository finché le dipendenze dell'altra app non sono state verificate e le regole repo e live non sono state riconciliate e testate. La distribuzione potrebbe interrompere caricamenti o accessi di altre app.
+
 Prima del deploy verificare nella console Firebase:
 
 - Google Authentication attiva;
@@ -24,6 +28,8 @@ npm run dev
 ```
 
 ## Deploy delle risorse Firebase
+
+Il comando seguente distribuisce regole e indici Firestore e regole Storage al progetto selezionato. Eseguirlo solo dopo aver verificato le risorse condivise e confrontato le regole locali con quelle live; non usarlo come deploy generico di Tempio.
 
 Dopo aver eseguito il login con un account autorizzato al progetto:
 
