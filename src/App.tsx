@@ -6630,7 +6630,7 @@ export default function App() {
                     <h4 className="font-serif italic text-xl mb-2">B. PERCORSO "INNER LIGHT CIRCLE"</h4>
                     <p className="text-[10px] uppercase tracking-widest font-bold text-[#c2b280] mb-6">Abbonamento Esclusivo</p>
                     <div className="space-y-4 text-sm opacity-90 flex-1">
-                      <p>Il supporto continuo per chi desidera una trasformazione totale e duratura.</p>
+                      <p>Il supporto continuo per chi desidera un percorso di riflessione e ascolto personale.</p>
                       <ul className="space-y-2 list-disc pl-4">
                         <li>1 Check-up energetico mensile.</li>
                         <li>Supporto "SOS Energia" via WhatsApp.</li>
