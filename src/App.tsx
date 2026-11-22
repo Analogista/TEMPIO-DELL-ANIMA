@@ -5095,7 +5095,7 @@ export default function App() {
               
               <img 
                 src="https://files.manuscdn.com/user_upload_by_module/session_file/92323165/cnrwUQwBkASOlPnZ.webp" 
-                alt="Graziamaria" 
+                alt="Illustrazione delle fasi lunari su sfondo turchese" 
                 className="w-full max-w-lg aspect-[16/9] object-cover rounded-2xl shadow-lg"
                 referrerPolicy="no-referrer"
               />
@@ -5365,6 +5365,7 @@ export default function App() {
               <div className="w-full max-w-6xl flex justify-between items-center mb-2">
                 <button 
                   onClick={() => setCurrentPage('home')}
+                  aria-label="Torna alla home"
                   className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#5a5a40] hover:text-[#c2b280] transition-colors"
                 >
                   <X size={16} /> Home
@@ -5372,6 +5373,9 @@ export default function App() {
                 <div className="text-center flex-1">
                   <h1 className="font-serif italic tracking-tight" style={{ color: '#090909', fontSize: '28px', lineHeight: '26px', fontWeight: 'bold' }}>Costellazioni</h1>
                   <p className="uppercase tracking-[0.2em]" style={{ color: '#5a5a40', fontSize: '10px', fontWeight: 'bold' }}>Esperienza guidata di riflessione personale</p>
+                  <p className="text-[11px] sm:text-xs text-[#4a3f35]/80 max-w-2xl mx-auto mt-3 leading-relaxed">
+                    L’esperienza non costituisce una diagnosi, una terapia o un trattamento sanitario e non sostituisce il parere di professionisti qualificati.
+                  </p>
                   <img 
                     src={constellationLayoutType === 'building' ? BUILDING_HEADER_IMAGE_URL : '/fiori/00_Personaggi.webp'} 
                     alt={constellationLayoutType === 'building' ? 'Palazzo Costellazione' : 'Personaggi'} 
@@ -6387,6 +6391,7 @@ export default function App() {
             <header className="mb-6 sm:mb-12 text-center relative">
               <button 
                 onClick={() => setCurrentPage('home')}
+                aria-label="Torna alla home"
                 className="absolute left-0 top-0 p-2 text-[#5a5a40] hover:bg-white rounded-full transition-colors"
               >
                 <X size={20} className="sm:size-6" />
@@ -6397,6 +6402,9 @@ export default function App() {
               </div>
               <h2 className="font-serif italic text-3xl sm:text-4xl mb-1 sm:mb-2 text-[#4a3f35]">Rune</h2>
               <p className="text-[#c2b280] uppercase tracking-[0.2em] sm:tracking-[0.3em] text-[8px] sm:text-[10px] font-black mb-6">Antica Saggezza Simbolica</p>
+              <p className="text-xs text-[#4a3f35]/80 max-w-2xl mx-auto -mt-3 mb-6 leading-relaxed">
+                L’esperienza non costituisce una diagnosi, una terapia o un trattamento sanitario e non sostituisce il parere di professionisti qualificati.
+              </p>
               
               {/* Description Box */}
               <div 
@@ -6543,6 +6551,7 @@ export default function App() {
             <header className="mb-12 text-center relative">
               <button 
                 onClick={() => setCurrentPage('home')}
+                aria-label="Torna alla home"
                 className="absolute left-0 top-0 p-2 text-[#5a5a40] hover:bg-white rounded-full transition-colors"
               >
                 <X size={20} className="sm:size-6" />
@@ -6553,6 +6562,9 @@ export default function App() {
               </div>
               <h2 className="font-serif italic text-4xl mb-2 text-[#4a3f35]">Guida ai Percorsi di Riflessione Alchemica</h2>
               <p className="text-[#c2b280] uppercase tracking-[0.3em] text-[10px] font-black">Dall’Invisibile alla Libertà: Il Metodo Graziamaria</p>
+              <p className="text-xs text-[#4a3f35]/80 max-w-2xl mx-auto mt-4 leading-relaxed">
+                L’esperienza non costituisce una diagnosi, una terapia o un trattamento sanitario e non sostituisce il parere di professionisti qualificati.
+              </p>
             </header>
 
             <main className="max-w-4xl mx-auto space-y-12 pb-20">
@@ -6720,6 +6732,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setCurrentPage('home')}
+                  aria-label="Torna alla home"
                   className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#5a5a40] hover:text-[#c2b280] transition-colors"
                 >
                   <X size={16} /> Home
@@ -6744,6 +6757,9 @@ export default function App() {
                 <div className="bg-white/80 backdrop-blur-sm p-6 sm:p-10 rounded-[2rem] border border-[#e5e0d8] shadow-sm text-left sm:text-center">
                   <p className="text-[#4a3f35] leading-relaxed text-sm sm:text-base opacity-90">
                     Secondo la tradizione spirituale, i Registri Akashici rappresentano un archivio simbolico della memoria dell&apos;anima. Attraverso questa esperienza di introspezione potrai dedicarti all&apos;ascolto interiore, esplorare le domande che porti dentro di te e aprirti a nuove prospettive di consapevolezza.
+                  </p>
+                  <p className="text-xs sm:text-sm text-[#4a3f35]/80 leading-relaxed mt-4">
+                    L’esperienza non costituisce una diagnosi, una terapia o un trattamento sanitario e non sostituisce il parere di professionisti qualificati.
                   </p>
                   {!showAkashicForm && !akashicSubmitted && (
                     <div className="mt-8 flex justify-center">
@@ -7322,6 +7338,7 @@ export default function App() {
             <header className="mb-12 text-center relative">
               <button 
                 onClick={() => setCurrentPage('home')}
+                aria-label="Torna alla home"
                 className="absolute left-0 top-0 p-2 text-[#5a5a40] hover:bg-white rounded-full transition-colors"
               >
                 <X size={20} className="sm:size-6" />
@@ -7332,6 +7349,9 @@ export default function App() {
               </div>
               <h2 className="font-serif italic text-4xl mb-2 text-[#4a3f35]">Accademia di Graziamaria</h2>
               <p className="text-[#c2b280] uppercase tracking-[0.3em] text-[10px] font-black">Percorso di Apprendimento Olistico</p>
+              <p className="text-xs text-[#4a3f35]/80 max-w-2xl mx-auto mt-4 leading-relaxed">
+                L’esperienza non costituisce una diagnosi, una terapia o un trattamento sanitario e non sostituisce il parere di professionisti qualificati.
+              </p>
             </header>
 
             <main className="max-w-4xl mx-auto space-y-12 pb-20">
@@ -7412,6 +7432,7 @@ export default function App() {
             <header className="mb-6 sm:mb-12 text-center relative">
               <button 
                 onClick={() => setCurrentPage('home')}
+                aria-label="Torna alla home"
                 className="absolute left-0 top-0 p-2 text-[#5a5a40] hover:bg-white rounded-full transition-colors"
               >
                 <X size={20} className="sm:size-6" />
@@ -7422,6 +7443,9 @@ export default function App() {
               </div>
               <h2 className="font-serif italic text-3xl sm:text-4xl mb-1 sm:mb-2 text-[#4a3f35]">Fiori di Bach</h2>
               <p className="text-[#c2b280] uppercase tracking-[0.2em] sm:tracking-[0.3em] text-[8px] sm:text-[10px] font-black mb-6">Esperienza guidata di riflessione personale</p>
+              <p className="text-xs text-[#4a3f35]/80 max-w-2xl mx-auto -mt-3 mb-6 leading-relaxed">
+                L’esperienza non costituisce una diagnosi, una terapia o un trattamento sanitario e non sostituisce il parere di professionisti qualificati.
+              </p>
               
               {/* User Data Section */}
               <div className="flex flex-wrap gap-3 justify-center w-full max-w-2xl mx-auto mb-8">
@@ -7582,6 +7606,7 @@ export default function App() {
                   >
                     <button 
                       onClick={() => setSelectedFlower(null)}
+                      aria-label="Torna alla schermata precedente"
                       className="absolute right-3 top-3 sm:right-4 sm:top-4 z-20 p-2 bg-white/80 backdrop-blur-sm rounded-full text-[#4a3f35] hover:bg-white transition-colors shadow-sm"
                     >
                       <X size={18} className="sm:size-5" />
@@ -7661,7 +7686,7 @@ export default function App() {
             >
               <div className="flex justify-between items-center mb-4 sm:mb-6">
                 <h2 className="text-xl sm:text-2xl font-serif italic">Scegli un Personaggio</h2>
-                <button onClick={() => setShowPicker(false)} className="p-2 hover:bg-[#f8f5f0] rounded-full transition-colors">
+                <button onClick={() => setShowPicker(false)} aria-label="Torna alla schermata precedente" className="p-2 hover:bg-[#f8f5f0] rounded-full transition-colors">
                   <X size={20} className="sm:size-6" />
                 </button>
               </div>
@@ -7979,6 +8004,7 @@ export default function App() {
                       setShowCandidacyModal(false);
                       setSubmissionResult(null);
                     }}
+                    aria-label="Torna alla schermata precedente"
                     className="p-3 hover:bg-[#fdfbf7] rounded-full text-[#4a3f35] transition-all hover:rotate-90"
                   >
                     <X size={24} />
@@ -8025,8 +8051,9 @@ export default function App() {
                   <div className="space-y-10">
                     <div className="space-y-8">
                       {/* Step info */}
-                      <div className="bg-[#fdfbf7] p-6 rounded-3xl border border-[#e5e0d8] text-sm italic opacity-80 leading-relaxed">
-                        "Benvenuto. Rispondi con onestà. Queste domande servono a Graziamaria per contestualizzare il tuo percorso di riflessione personale."
+                      <div className="bg-[#fdfbf7] p-6 rounded-3xl border border-[#e5e0d8] text-sm italic opacity-80 leading-relaxed space-y-3">
+                        <p>"Benvenuto. Rispondi con onestà. Queste domande servono a Graziamaria per contestualizzare il tuo percorso di riflessione personale."</p>
+                        <p className="not-italic text-xs opacity-90">L’esperienza non costituisce una diagnosi, una terapia o un trattamento sanitario e non sostituisce il parere di professionisti qualificati.</p>
                       </div>
 
                       {/* Question 1 */}
