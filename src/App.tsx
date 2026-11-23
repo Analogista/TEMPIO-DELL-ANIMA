@@ -1618,7 +1618,7 @@ export default function App() {
     const prefilled = {
       ...candidacyForm,
       nome: userProfile?.nome || candidacyForm.nome,
-      email: userProfile?.email || user?.email || candidacyForm.email,
+      email: user?.email || '',
       citta: userProfile?.citta || candidacyForm.citta,
       eta: userProfile?.eta || candidacyForm.eta,
       telefono: userProfile?.telefono || candidacyForm.telefono,
@@ -2475,7 +2475,7 @@ export default function App() {
                 ? {
                     ...prev,
                     nome: profile.nome,
-                    email: profile.email || user.email || '',
+                    email: user.email || '',
                     telefono: profile.telefono || '',
                     eta: profile.eta || '',
                     citta: profile.citta || '',
@@ -2788,9 +2788,73 @@ export default function App() {
       return;
     }
 
+    const accountEmail = user.email || '';
+    if (!accountEmail) {
+      showAlert('Accesso richiesto', "Effettua l'accesso con un account Google valido provvisto di email.");
+      return;
+    }
+
+    const nome = candidacyForm.nome.trim();
+    const telefono = candidacyForm.telefono.trim();
+    const eta = String(candidacyForm.eta ?? '').trim();
+    const citta = candidacyForm.citta.trim();
+    const puntoRottura = candidacyForm.puntoRottura.trim();
+    const message = String(candidacyForm.message ?? '').trim();
+
+    if (!nome || !telefono || !puntoRottura) {
+      showAlert('Campi obbligatori', 'Nome, Telefono e Descrizione del tema sono obbligatori.');
+      return;
+    }
+
+    if (nome.length > 100) {
+      showAlert('Dato non valido', 'Il nome può contenere al massimo 100 caratteri.');
+      return;
+    }
+
+    if (telefono.length > 30) {
+      showAlert('Dato non valido', 'Il numero di telefono può contenere al massimo 30 caratteri.');
+      return;
+    }
+
+    if (eta && !/^\d{1,3}$/.test(eta)) {
+      showAlert('Dato non valido', "L'età deve contenere solo numeri e al massimo 3 caratteri.");
+      return;
+    }
+
+    if (citta.length > 100) {
+      showAlert('Dato non valido', 'La città può contenere al massimo 100 caratteri.');
+      return;
+    }
+
+    if (puntoRottura.length > 1000) {
+      showAlert('Dato non valido', 'La descrizione può contenere al massimo 1000 caratteri.');
+      return;
+    }
+
+    if (message.length > 2000) {
+      showAlert('Dato non valido', 'Il messaggio può contenere al massimo 2000 caratteri.');
+      return;
+    }
+
+    if (!candidacyForm.pattoFiducia || !candidacyForm.rispettoSpazioSacro || !candidacyForm.portaleVisivo) {
+      showAlert('Conferma richiesta', 'Per favore, accetta i patti di fiducia e conferma la disponibilità delle foto per procedere.');
+      return;
+    }
+
     let profilePhotoUrls: string[] = Array.isArray(userProfile?.photoUrls)
       ? userProfile.photoUrls.filter((url: unknown): url is string => typeof url === 'string' && url.length > 0)
       : [];
+
+    if (profilePhotoUrls.length + candidacyFiles.length < 1) {
+      showAlert('Foto richieste', 'Per favore, carica almeno 1 foto della pianta dei piedi per procedere.');
+      return;
+    }
+
+    if (profilePhotoUrls.length + candidacyFiles.length > 2) {
+      showAlert('Troppe foto', 'Puoi caricare al massimo 2 foto in totale.');
+      return;
+    }
+
     try {
       const freshProfile = await getDoc(doc(db, 'users', user.uid, 'profile', 'data'));
       if (freshProfile.exists()) {
@@ -2803,18 +2867,13 @@ export default function App() {
       console.error('Error refreshing profile before candidacy:', profileError);
     }
 
-    if (!candidacyForm.nome || !candidacyForm.email || !candidacyForm.telefono || !candidacyForm.puntoRottura) {
-      showAlert('Campi obbligatori', 'Nome, Email, Telefono e Descrizione del tema sono obbligatori.');
-      return;
-    }
-
-    if (!candidacyForm.pattoFiducia || !candidacyForm.rispettoSpazioSacro || !candidacyForm.portaleVisivo) {
-      showAlert('Conferma richiesta', 'Per favore, accetta i patti di fiducia e conferma la disponibilità delle foto per procedere.');
-      return;
-    }
-
     if (profilePhotoUrls.length + candidacyFiles.length < 1) {
       showAlert('Foto richieste', 'Per favore, carica almeno 1 foto della pianta dei piedi per procedere.');
+      return;
+    }
+
+    if (profilePhotoUrls.length + candidacyFiles.length > 2) {
+      showAlert('Troppe foto', 'Puoi caricare al massimo 2 foto in totale.');
       return;
     }
 
@@ -2832,27 +2891,34 @@ export default function App() {
           uploadedUrls.push(url);
         } catch (uploadError: any) {
           console.error("Firebase Storage Upload Error:", uploadError);
-          throw new Error(`Errore caricamento foto (${file.name}): ${uploadError.message}. Verifica che Firebase Storage sia attivo nel progetto app-utili-508807.`);
+          throw new Error('Controlla i dati inseriti e riprova');
         }
       }
 
-      if (uploadedUrls.length < 1) {
-        throw new Error('È necessaria almeno 1 foto valida della pianta dei piedi.');
+      if (uploadedUrls.length < 1 || uploadedUrls.length > 2) {
+        throw new Error('Controlla i dati inseriti e riprova');
       }
 
       // Save profile and both candidature views atomically.
       const profileData = {
-        nome: candidacyForm.nome,
-        email: candidacyForm.email,
-        telefono: candidacyForm.telefono,
-        eta: candidacyForm.eta,
-        citta: candidacyForm.citta,
-        puntoRottura: candidacyForm.puntoRottura,
+        nome,
+        email: accountEmail,
+        telefono,
+        eta,
+        citta,
+        puntoRottura,
         photoUrls: uploadedUrls,
         updatedAt: serverTimestamp()
       };
       const candidacyData = {
         ...candidacyForm,
+        nome,
+        email: accountEmail,
+        telefono,
+        eta,
+        citta,
+        puntoRottura,
+        message,
         userId: user.uid,
         photoUrls: uploadedUrls,
         status: 'pending',
@@ -2870,7 +2936,7 @@ export default function App() {
       setSubmissionResult(isComplex ? 'complex' : 'standard');
 
       // WhatsApp message
-      const whatsappMsg = `Ciao Graziamaria, ho appena completato il Portale Visivo e inviato la mia Candidatura.\n\nNome: ${candidacyForm.nome}\nEmail: ${candidacyForm.email}\nFastidio: ${candidacyForm.puntoRottura}\nUrgenza: ${candidacyForm.termometroUrgenza || '5'}/10\n\nHo caricato le foto delle piante dei miei piedi nel mio profilo. Attendo una tua analisi Alchemica.`;
+      const whatsappMsg = `Ciao Graziamaria, ho appena completato il Portale Visivo e inviato la mia Candidatura.\n\nNome: ${nome}\nEmail: ${accountEmail}\nFastidio: ${puntoRottura}\nUrgenza: ${candidacyForm.termometroUrgenza || '5'}/10\n\nHo caricato le foto delle piante dei miei piedi nel mio profilo. Attendo una tua analisi Alchemica.`;
       const whatsappUrl = `https://wa.me/393497921890?text=${encodeURIComponent(whatsappMsg)}`;
       
       // Open WhatsApp
@@ -2885,7 +2951,7 @@ export default function App() {
       setCandidacyFiles([]);
     } catch (e: any) {
       console.error("Full Candidacy Submission Error:", e);
-      showAlert('Errore candidatura', e.message || "Errore durante l'invio della candidatura. Assicurati che lo Storage sia attivo nella console Firebase.");
+      showAlert('Errore candidatura', 'Controlla i dati inseriti e riprova');
     } finally {
       setIsSubmittingCandidacy(false);
     }
@@ -8080,6 +8146,7 @@ export default function App() {
                         <textarea 
                           value={candidacyForm.puntoRottura}
                           onChange={(e) => setCandidacyForm({...candidacyForm, puntoRottura: e.target.value})}
+                          maxLength={1000}
                           className="w-full p-5 bg-[#fdfbf7] border border-[#e5e0d8] rounded-[1.5rem] focus:outline-none focus:ring-2 focus:ring-[#c2b280] min-h-[120px] text-sm"
                           placeholder="Mi sento bloccata nel..."
                         />
@@ -8173,6 +8240,7 @@ export default function App() {
                             type="text"
                             value={candidacyForm.nome}
                             onChange={(e) => setCandidacyForm({...candidacyForm, nome: e.target.value})}
+                            maxLength={100}
                             className="w-full p-4 bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#c2b280] text-sm"
                             placeholder="Nome Completo"
                           />
@@ -8181,11 +8249,13 @@ export default function App() {
                           <label className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2 block">La tua Email</label>
                           <input 
                             type="email"
-                            value={candidacyForm.email}
-                            onChange={(e) => setCandidacyForm({...candidacyForm, email: e.target.value})}
-                            className="w-full p-4 bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#c2b280] text-sm"
-                            placeholder="Email per il report"
+                            value={user?.email || candidacyForm.email}
+                            readOnly
+                            aria-readonly="true"
+                            className="w-full p-4 bg-[#f8f5f0] border border-[#e5e0d8] rounded-2xl text-sm text-[#4a3f35]/70 cursor-not-allowed focus:outline-none"
+                            placeholder="Email dell'account con cui hai effettuato l'accesso"
                           />
+                          <p className="text-[10px] opacity-50 mt-1.5">Email dell&apos;account con cui hai effettuato l&apos;accesso</p>
                         </div>
                         <div>
                           <label className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2 block">Cellulare</label>
@@ -8193,6 +8263,7 @@ export default function App() {
                             type="tel"
                             value={candidacyForm.telefono}
                             onChange={(e) => setCandidacyForm({...candidacyForm, telefono: e.target.value})}
+                            maxLength={30}
                             className="w-full p-4 bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#c2b280] text-sm"
                             placeholder="Il tuo numero per WhatsApp"
                           />
@@ -8200,9 +8271,12 @@ export default function App() {
                         <div>
                           <label className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2 block">Età</label>
                           <input 
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={3}
                             value={candidacyForm.eta}
-                            onChange={(e) => setCandidacyForm({...candidacyForm, eta: e.target.value})}
+                            onChange={(e) => setCandidacyForm({...candidacyForm, eta: e.target.value.replace(/\D/g, '').slice(0, 3)})}
                             className="w-full p-4 bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#c2b280] text-sm"
                             placeholder="Anni"
                           />
@@ -8213,6 +8287,7 @@ export default function App() {
                             type="text"
                             value={candidacyForm.citta}
                             onChange={(e) => setCandidacyForm({...candidacyForm, citta: e.target.value})}
+                            maxLength={100}
                             className="w-full p-4 bg-[#fdfbf7] border border-[#e5e0d8] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#c2b280] text-sm"
                             placeholder="La tua città"
                           />
