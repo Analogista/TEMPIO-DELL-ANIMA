@@ -2925,26 +2925,31 @@ export default function App() {
         createdAt: serverTimestamp()
       };
       const batch = writeBatch(db);
+      const userCandidacyRef = doc(collection(db, 'users', user.uid, 'candidacies'));
       batch.set(doc(db, 'users', user.uid, 'profile', 'data'), profileData);
       batch.set(doc(collection(db, 'candidacies')), candidacyData);
-      batch.set(doc(collection(db, 'users', user.uid, 'candidacies')), candidacyData);
+      batch.set(userCandidacyRef, candidacyData);
       await batch.commit();
       setUserProfile(profileData);
+
+      try {
+        const q = query(
+          collection(db, 'users', user.uid, 'candidacies'),
+          orderBy('createdAt', 'desc')
+        );
+        const snapshot = await getDocs(q);
+        const candidacies = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        setUserCandidacies(candidacies);
+      } catch (refreshError) {
+        console.error('Error refreshing user candidacies:', refreshError);
+        setUserCandidacies(prev => [{ id: userCandidacyRef.id, ...candidacyData, createdAt: new Date() }, ...prev]);
+      }
 
       // Determine result
       const isComplex = candidacyForm.termometroUrgenza >= 9 || candidacyForm.radiceTempo === 'cronico';
       setSubmissionResult(isComplex ? 'complex' : 'standard');
 
-      // WhatsApp message
-      const whatsappMsg = `Ciao Graziamaria, ho appena completato il Portale Visivo e inviato la mia Candidatura.\n\nNome: ${nome}\nEmail: ${accountEmail}\nFastidio: ${puntoRottura}\nUrgenza: ${candidacyForm.termometroUrgenza || '5'}/10\n\nHo caricato le foto delle piante dei miei piedi nel mio profilo. Attendo una tua analisi Alchemica.`;
-      const whatsappUrl = `https://wa.me/393497921890?text=${encodeURIComponent(whatsappMsg)}`;
-      
-      // Open WhatsApp
-      setTimeout(() => {
-        window.open(whatsappUrl, '_blank');
-      }, 1500);
-      
-      showAlert('Candidatura salvata', 'Candidatura salvata! Ora si aprirà WhatsApp per inviare la notifica a Graziamaria. Lei ti risponderà direttamente su WhatsApp.');
+      showAlert('Candidatura salvata', "La tua candidatura è stata ricevuta. La trovi nella tua area personale, in 'Le tue Candidature'.");
       
       // Reset form but keep modal open for result screen
       setCandidacyForm({ ...INITIAL_CANDIDACY_FORM });
@@ -7256,13 +7261,21 @@ export default function App() {
                           <div className="flex justify-between items-start mb-4">
                             <div>
                               <p className="text-[10px] font-bold text-[#c2b280] uppercase tracking-widest">Inviata il</p>
-                              <p className="text-sm font-serif italic">{cand.createdAt?.toDate ? cand.createdAt.toDate().toLocaleDateString('it-IT') : 'Recentemente'}</p>
+                              <p className="text-sm font-serif italic">
+                                {cand.createdAt?.toDate
+                                  ? cand.createdAt.toDate().toLocaleDateString('it-IT')
+                                  : cand.createdAt instanceof Date
+                                    ? cand.createdAt.toLocaleDateString('it-IT')
+                                    : new Date().toLocaleDateString('it-IT')}
+                              </p>
                             </div>
                             <span className="px-3 py-1 bg-[#fdfbf7] border border-[#e5e0d8] rounded-full text-[8px] font-black uppercase tracking-tighter text-[#c2b280]">
-                              In Fase di Analisi
+                              Candidatura ricevuta
                             </span>
                           </div>
-                          <p className="text-sm opacity-80 mb-4 italic leading-relaxed">"{cand.message || 'Nel messaggio hai scritto: il cliente non ha aggiunto note'}"</p>
+                          {cand.message?.trim() && (
+                            <p className="text-sm opacity-80 mb-4 italic leading-relaxed">"{cand.message}"</p>
+                          )}
                           {cand.photoUrls && cand.photoUrls.length > 0 && (
                             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
                               {cand.photoUrls.map((url: string, idx: number) => (
@@ -8114,7 +8127,7 @@ export default function App() {
                           </>
                         )}
                       </div>
-                      <p className="text-xs opacity-60">Abbiamo aperto WhatsApp per te, invia il messaggio generato per accelerare il processo.</p>
+                      <p className="text-xs opacity-60">La tua candidatura è stata ricevuta. La trovi nella tua area personale, in &apos;Le tue Candidature&apos;.</p>
                     </div>
 
                     <button 
