@@ -2813,8 +2813,8 @@ export default function App() {
       return;
     }
 
-    if (profilePhotoUrls.length + candidacyFiles.length < 2) {
-      showAlert('Foto richieste', 'Per favore, carica almeno 2 foto della pianta dei tuoi piedi (sinistro e destro) per procedere.');
+    if (profilePhotoUrls.length + candidacyFiles.length < 1) {
+      showAlert('Foto richieste', 'Per favore, carica almeno 1 foto della pianta dei piedi per procedere.');
       return;
     }
 
@@ -2836,8 +2836,8 @@ export default function App() {
         }
       }
 
-      if (uploadedUrls.length < 2) {
-        throw new Error('Sono necessarie almeno 2 foto valide della pianta dei piedi.');
+      if (uploadedUrls.length < 1) {
+        throw new Error('È necessaria almeno 1 foto valida della pianta dei piedi.');
       }
 
       // Save profile and both candidature views atomically.
@@ -4905,29 +4905,43 @@ export default function App() {
                             {/* Photos */}
                             <div className="space-y-4">
                               <h5 className="text-[10px] uppercase tracking-[0.3em] font-black text-[#c2b280]">Portali Visivi (Foto)</h5>
-                              <div className="grid grid-cols-2 gap-3">
-                                {can.photoUrls?.map((url: string, idx: number) => (
-                                  <div key={idx} className="aspect-square relative group/img overflow-hidden rounded-2xl border border-[#e5e0d8] shadow-sm">
-                                    <img 
-                                      src={url} 
-                                      alt={`Piedi ${can.nome}`} 
-                                      className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-110"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                    <button 
-                                      onClick={() => window.open(url, '_blank')}
-                                      className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-bold uppercase tracking-widest"
-                                    >
-                                      Ingrandisci
-                                    </button>
+                              {(() => {
+                                const validPhotoUrls: string[] = Array.isArray(can.photoUrls)
+                                  ? can.photoUrls.filter((u: unknown): u is string => typeof u === 'string' && u.trim().length > 0)
+                                  : [];
+                                const isSinglePhoto = validPhotoUrls.length === 1;
+                                if (validPhotoUrls.length === 0) {
+                                  return (
+                                    <div className="h-32 bg-[#f8f5f0] rounded-2xl flex items-center justify-center text-[10px] opacity-40 italic border border-dashed border-[#e5e0d8]">
+                                      Nessuna foto caricata
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <div className={isSinglePhoto ? 'grid grid-cols-1' : 'grid grid-cols-2 gap-3'}>
+                                    {validPhotoUrls.map((url, idx) => (
+                                      <div
+                                        key={`${can.id}-photo-${idx}`}
+                                        className={`${isSinglePhoto ? 'aspect-[4/3] bg-[#fdfbf7]' : 'aspect-square'} relative group/img overflow-hidden rounded-2xl border border-[#e5e0d8] shadow-sm`}
+                                      >
+                                        <img 
+                                          src={url} 
+                                          alt={`Piedi ${can.nome || 'utente'}${validPhotoUrls.length > 1 ? ` (${idx + 1})` : ''}`}
+                                          className={`w-full h-full ${isSinglePhoto ? 'object-contain' : 'object-cover'} transition-transform duration-700 group-hover/img:scale-105`}
+                                          referrerPolicy="no-referrer"
+                                        />
+                                        <button 
+                                          type="button"
+                                          onClick={() => window.open(url, '_blank')}
+                                          className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-bold uppercase tracking-widest"
+                                        >
+                                          Ingrandisci
+                                        </button>
+                                      </div>
+                                    ))}
                                   </div>
-                                ))}
-                                {(!can.photoUrls || can.photoUrls.length === 0) && (
-                                  <div className="col-span-2 h-32 bg-[#f8f5f0] rounded-2xl flex items-center justify-center text-[10px] opacity-40 italic border border-dashed border-[#e5e0d8]">
-                                    Nessuna foto caricata
-                                  </div>
-                                )}
-                              </div>
+                                );
+                              })()}
                             </div>
 
                             {/* Readings & Notes */}
@@ -8264,6 +8278,14 @@ export default function App() {
                           <span>Il Portale Visivo (Piante dei Piedi)</span>
                           <span className="text-[10px] opacity-40 font-normal">{(userProfile?.photoUrls?.length || 0) + candidacyFiles.length}/2 caricate</span>
                         </label>
+                        <div className="w-full max-w-[480px] mx-auto">
+                          <img
+                            src="/assets/aistudio/questionario-alchemico-esempio-piedi-v2_2263c666.webp"
+                            alt="Esempio delle foto da inviare con luce naturale: foto unica di entrambi i piedi oppure foto singola piede destro e sinistro"
+                            loading="lazy"
+                            className="w-full h-auto rounded-2xl border border-[#e5e0d8] shadow-sm block"
+                          />
+                        </div>
                         <div className="flex flex-wrap gap-4">
                           {/* Existing Photos from Profile */}
                           {userProfile?.photoUrls?.map((url: string, idx: number) => (
@@ -8309,7 +8331,7 @@ export default function App() {
                             </label>
                           )}
                         </div>
-                        <p className="text-[10px] opacity-40 italic">Le foto della pianta (sinistra e destra) sono obbligatorie. Devono essere nitide per consentire un'osservazione simbolica accurata.</p>
+                        <p className="text-[10px] opacity-40 italic">Utilizza i 2 box sopra nel caso volessi caricare foto singola piede destro e sinistro. In caso di foto unica con entrambi i piedi, utilizzare un solo caricamento nel box</p>
                       </div>
 
                       <button 
