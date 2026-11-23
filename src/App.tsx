@@ -1563,6 +1563,7 @@ export default function App() {
   const [candidacyForm, setCandidacyForm] = useState({ ...INITIAL_CANDIDACY_FORM });
   const [candidacyFiles, setCandidacyFiles] = useState<File[]>([]);
   const [isSubmittingCandidacy, setIsSubmittingCandidacy] = useState(false);
+  const [deletingProfilePhotoIdx, setDeletingProfilePhotoIdx] = useState<number | null>(null);
   const [userCandidacies, setUserCandidacies] = useState<any[]>([]);
   const [runeHistory, setRuneHistory] = useState<any[]>([]);
   const [flowerHistory, setFlowerHistory] = useState<any[]>([]);
@@ -2960,6 +2961,41 @@ export default function App() {
     } finally {
       setIsSubmittingCandidacy(false);
     }
+  };
+
+  const handleDeleteSavedProfilePhoto = (indexToRemove: number) => {
+    if (!user || deletingProfilePhotoIdx !== null || isSubmittingCandidacy) return;
+
+    showConfirm(
+      'Elimina foto',
+      'Vuoi eliminare questa foto dal tuo profilo?',
+      async () => {
+        const currentPhotoUrls: string[] = Array.isArray(userProfile?.photoUrls)
+          ? userProfile.photoUrls.filter((url: unknown): url is string => typeof url === 'string' && url.length > 0)
+          : [];
+        if (indexToRemove < 0 || indexToRemove >= currentPhotoUrls.length) return;
+
+        const nextPhotoUrls = currentPhotoUrls.filter((_, idx) => idx !== indexToRemove);
+        setDeletingProfilePhotoIdx(indexToRemove);
+        try {
+          await updateDoc(doc(db, 'users', user.uid, 'profile', 'data'), {
+            photoUrls: nextPhotoUrls,
+            updatedAt: serverTimestamp()
+          });
+          setUserProfile((prev: any) => (
+            prev
+              ? { ...prev, photoUrls: nextPhotoUrls }
+              : { photoUrls: nextPhotoUrls }
+          ));
+        } catch (error) {
+          console.error('Error removing photo from profile:', error);
+          showAlert('Errore', 'Non è stato possibile eliminare la foto. Riprova.');
+        } finally {
+          setDeletingProfilePhotoIdx(null);
+        }
+      },
+      { danger: true, confirmLabel: 'Elimina', cancelLabel: 'Annulla' }
+    );
   };
 
   const [selectedFlower, setSelectedFlower] = useState<BachFlower | null>(null);
@@ -8377,11 +8413,19 @@ export default function App() {
                         <div className="flex flex-wrap gap-4">
                           {/* Existing Photos from Profile */}
                           {userProfile?.photoUrls?.map((url: string, idx: number) => (
-                            <div key={`existing-${idx}`} className="w-20 h-20 rounded-2xl bg-[#fdfbf7] border border-[#c2b280] overflow-hidden relative group shadow-sm transition-transform hover:scale-105">
-                              <img src={url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                              <div className="absolute inset-0 bg-[#c2b280]/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <CheckCircle2 size={24} className="text-[#c2b280]" />
+                            <div key={`existing-${idx}`} className="flex flex-col items-center gap-1.5">
+                              <div className="w-20 h-20 rounded-2xl bg-[#fdfbf7] border border-[#c2b280] overflow-hidden relative shadow-sm">
+                                <img src={url} alt={`Foto salvata ${idx + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSavedProfilePhoto(idx)}
+                                disabled={deletingProfilePhotoIdx !== null || isSubmittingCandidacy}
+                                className="w-20 min-h-[32px] px-2 py-1 rounded-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[10px] font-bold flex items-center justify-center gap-1 transition-colors active:scale-95 disabled:opacity-50"
+                              >
+                                <Trash2 size={12} />
+                                <span>{deletingProfilePhotoIdx === idx ? '...' : 'Elimina'}</span>
+                              </button>
                             </div>
                           ))}
 
